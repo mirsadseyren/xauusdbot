@@ -1,0 +1,73 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>XAUUSD Premium Chart</title>
+    <link rel="stylesheet" href="style.css">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+</head>
+<body>
+    <div class="app-container">
+        <header class="topbar">
+            <div class="brand">
+                <h1>XAUUSD <span class="highlight">Analytics</span></h1>
+            </div>
+            <div class="timeframes">
+                <button class="tf-btn" data-tf="1m">1m</button>
+                <button class="tf-btn" data-tf="3m">3m</button>
+                <button class="tf-btn" data-tf="5m">5m</button>
+                <button class="tf-btn" data-tf="10m">10m</button>
+                <button class="tf-btn" data-tf="15m">15m</button>
+                <button class="tf-btn active" data-tf="1h">1h</button>
+                <button class="tf-btn" data-tf="4h">4h</button>
+                <button class="tf-btn" data-tf="1d">1d</button>
+            </div>
+            <div class="tools">
+                <button class="tool-btn" id="indicator-btn" title="Indicators">fx</button>
+                <button class="tool-btn" title="Drawings (Coming soon)">✎</button>
+            </div>
+            
+            <!-- Indicator Settings Menu -->
+            <div id="indicator-menu" class="settings-menu hidden">
+                <div class="menu-header">
+                    <h3>Area Detection Settings</h3>
+                    <button id="close-menu-btn" class="close-btn">&times;</button>
+                </div>
+                <div class="menu-body">
+                    <div class="setting-row">
+                        <label for="toggle-areas">Enable Areas</label>
+                        <label class="switch">
+                            <input type="checkbox" id="toggle-areas">
+                            <span class="slider round"></span>
+                        </label>
+                    </div>
+                    <div class="setting-row">
+                        <label for="ema-period">EMA Period</label>
+                        <input type="number" id="ema-period" value="100" min="1" max="500">
+                    </div>
+                    <div class="setting-row">
+                        <label for="max-lookback">Max Lookback</label>
+                        <input type="number" id="max-lookback" value="6" min="1" max="20">
+                    </div>
+                    <div class="setting-row">
+                        <label for="max-percent">Max Movement (%)</label>
+                        <input type="number" id="max-percent" value="15" min="1" max="50">
+                    </div>
+                </div>
+            </div>
+        </header>
+        
+        <main class="chart-container">
+            <div id="loading" class="loading-overlay hidden">
+                <div class="spinner"></div>
+            </div>
+            <div id="chart"></div>
+        </main>
+    </div>
+
+    <!-- Lightweight Charts library -->
+    <script src="https://unpkg.com/lightweight-charts@4.1.1/dist/lightweight-charts.standalone.production.js"></script>
+    <script src="main.js"></script>
+</body>
+</html>
