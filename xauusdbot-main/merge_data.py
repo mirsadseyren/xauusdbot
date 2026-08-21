@@ -4,7 +4,8 @@ import pandas as pd
 import time
 
 def main():
-    data_dir = r"d:\Downloads\python dev\xauusdbot\data"
+    base_dir = os.path.dirname(os.path.abspath(__file__))
+    data_dir = os.path.join(base_dir, "data")
     csv_files = glob.glob(os.path.join(data_dir, "DAT_NT_XAUUSD_M1_*.csv"))
     csv_files.sort()
     

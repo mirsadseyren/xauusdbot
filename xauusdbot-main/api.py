@@ -7,7 +7,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from contextlib import asynccontextmanager
 
-DATA_PATH = r"d:\Downloads\python dev\xauusdbot\data\xauusd_merged.parquet"
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+DATA_PATH = os.path.join(BASE_DIR, "data", "xauusd_merged.parquet")
 df = None
 
 @asynccontextmanager
@@ -102,8 +103,22 @@ async def get_ohlc(
         import traceback
         traceback.print_exc()
         return {"error": str(e)}
+        
+@app.get("/api/backtest-results")
+async def get_backtest_results():
+    import json
+    json_path = os.path.join(BASE_DIR, "backtest_results.json")
+    if not os.path.exists(json_path):
+        return {"error": "Backtest results not found. Please run backtester.py first."}
+    
+    try:
+        with open(json_path, "r") as f:
+            data = json.load(f)
+        return data
+    except Exception as e:
+        return {"error": str(e)}
 
-frontend_dir = r"d:\Downloads\python dev\xauusdbot\frontend"
+frontend_dir = os.path.join(BASE_DIR, "frontend")
 if os.path.exists(frontend_dir):
     app.mount("/", StaticFiles(directory=frontend_dir, html=True), name="frontend")
 

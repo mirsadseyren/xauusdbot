@@ -5,6 +5,37 @@ let candlestickSeries = null;
 let isDataLoading = false;
 let earliestDataTime = null; 
 let currentChartData = [];
+let data4H = [];
+let global4HAreas = [];
+
+async function recalc4HAreas() {
+    try {
+        const res = await fetch('/api/backtest-results');
+        const data = await res.json();
+        if (data && !data.error) {
+            global4HAreas = data.pois.map(poi => ({
+                type: poi.type,
+                box_start_time: poi.start_time,
+                top: poi.top,
+                bottom: poi.bottom,
+                confirmed_time: poi.confirm_time
+            }));
+            
+            window.globalTrades = data.trades.map(t => ({
+                entry_time: t.entry_time,
+                close_time: t.exit_time,
+                trade_entry: t.entry_price,
+                trade_sl: t.sl_price,
+                trade_tp: t.tp_price,
+                status: t.status,
+                direction: t.direction
+            }));
+            console.log(`Loaded ${global4HAreas.length} POIs and ${window.globalTrades.length} trades from backend.`);
+        }
+    } catch(e) {
+        console.error("Failed to load backtest results", e);
+    }
+}
 
 // Indicator State & Custom Primitive
 const indicatorSettings = {
@@ -56,29 +87,22 @@ class AreaPrimitive {
                             const timeScale = _this.chart.timeScale();
                             
                             _this.areas.forEach(area => {
-                                const startX = timeScale.timeToCoordinate(area.box_start_time);
-                                if (startX === null) return;
+                                let startTime = area.display_start_time || area.box_start_time;
+                                let startX = timeScale.timeToCoordinate(startTime);
+                                if (startX === null) {
+                                    if (currentChartData.length > 0 && startTime < currentChartData[0].time) {
+                                        startX = -9999;
+                                    } else {
+                                        return;
+                                    }
+                                }
                                 
                                 const endX = scope.bitmapSize.width;
                                 const topY = _this.series.priceToCoordinate(area.top);
                                 const bottomY = _this.series.priceToCoordinate(area.bottom);
                                 
                                 if (topY !== null && bottomY !== null) {
-                                    const pullbackStartX = timeScale.timeToCoordinate(area.pullback_start_time);
-                                    const pullbackY = _this.series.priceToCoordinate(area.pullback_start_price);
-                                    
-                                    // Draw dotted line for the pullback movement
-                                    if (pullbackStartX !== null && pullbackY !== null) {
-                                        const extremumY = area.type === 'short' ? topY : bottomY;
-                                        ctx.beginPath();
-                                        ctx.setLineDash([5, 5]);
-                                        ctx.moveTo(pullbackStartX * scope.horizontalPixelRatio, pullbackY * scope.verticalPixelRatio);
-                                        ctx.lineTo(startX * scope.horizontalPixelRatio, extremumY * scope.verticalPixelRatio);
-                                        ctx.strokeStyle = area.type === 'long' ? 'rgba(38, 166, 154, 0.8)' : 'rgba(239, 83, 80, 0.8)';
-                                        ctx.lineWidth = 1.5 * scope.horizontalPixelRatio;
-                                        ctx.stroke();
-                                        ctx.setLineDash([]);
-                                    }
+                                    // Dotted line logic removed as pbTime is not provided by backend
 
                                     const x = Math.max(0, startX * scope.horizontalPixelRatio);
                                     const y = Math.min(topY, bottomY) * scope.verticalPixelRatio;
@@ -117,146 +141,126 @@ class AreaPrimitive {
 
 let areaPrimitive = new AreaPrimitive();
 
-function calculateEMA(data, period) {
-    if (data.length < period) return Array(data.length).fill(null);
-    let k = 2 / (period + 1);
-    let ema = Array(data.length).fill(null);
-    let sum = 0;
-    
-    for (let i = 0; i < data.length; i++) {
-        if (i < period - 1) {
-            sum += data[i].close;
-        } else if (i === period - 1) {
-            sum += data[i].close;
-            ema[i] = sum / period;
-        } else {
-            ema[i] = data[i].close * k + ema[i - 1] * (1 - k);
-        }
+class TradePrimitive {
+    constructor() {
+        this.trades = [];
+        this.chart = null;
+        this.series = null;
     }
-    return ema;
+    
+    attached(params) {
+        this.chart = params.chart;
+        this.series = params.series;
+        this.requestUpdate = params.requestUpdate;
+    }
+    
+    detached() {
+        this.chart = null;
+        this.series = null;
+        this.requestUpdate = null;
+    }
+    
+    updateAllViews() {
+        if (this.requestUpdate) this.requestUpdate();
+    }
+    
+    setTrades(trades) {
+        this.trades = trades;
+        this.updateAllViews();
+    }
+    
+    paneViews() {
+        const _this = this;
+        return [{
+            update() {},
+            renderer() {
+                return {
+                    draw(target) {
+                        target.useBitmapCoordinateSpace((scope) => {
+                            const ctx = scope.context;
+                            if (!_this.series || !_this.chart) return;
+                            
+                            const timeScale = _this.chart.timeScale();
+                            
+                            _this.trades.forEach(trade => {
+                                let startX = timeScale.timeToCoordinate(trade.entry_time);
+                                if (startX === null) {
+                                    if (currentChartData.length > 0 && trade.entry_time < currentChartData[0].time) {
+                                        startX = -9999;
+                                    } else {
+                                        return;
+                                    }
+                                } else {
+                                    startX *= scope.horizontalPixelRatio;
+                                }
+                                
+                                let endX = scope.bitmapSize.width;
+                                if (trade.close_time) {
+                                    let rawEndX = timeScale.timeToCoordinate(trade.close_time);
+                                    if (rawEndX !== null) {
+                                        endX = rawEndX * scope.horizontalPixelRatio;
+                                    }
+                                }
+                                
+                                const entryY = _this.series.priceToCoordinate(trade.trade_entry) * scope.verticalPixelRatio;
+                                const slY = _this.series.priceToCoordinate(trade.trade_sl) * scope.verticalPixelRatio;
+                                const tpY = _this.series.priceToCoordinate(trade.trade_tp) * scope.verticalPixelRatio;
+                                
+                                const w = endX - startX;
+                                
+                                // Draw Risk Box (Red)
+                                ctx.fillStyle = 'rgba(239, 83, 80, 0.2)';
+                                ctx.fillRect(startX, Math.min(entryY, slY), w, Math.abs(entryY - slY));
+                                
+                                // Draw Reward Box (Green)
+                                ctx.fillStyle = 'rgba(38, 166, 154, 0.2)';
+                                ctx.fillRect(startX, Math.min(entryY, tpY), w, Math.abs(entryY - tpY));
+                                
+                                // SL Line
+                                ctx.beginPath();
+                                ctx.moveTo(startX, slY);
+                                ctx.lineTo(startX + w, slY);
+                                ctx.strokeStyle = 'rgba(239, 83, 80, 1)';
+                                ctx.lineWidth = 1 * scope.horizontalPixelRatio;
+                                ctx.stroke();
+                                
+                                // TP Line
+                                ctx.beginPath();
+                                ctx.moveTo(startX, tpY);
+                                ctx.lineTo(startX + w, tpY);
+                                ctx.strokeStyle = 'rgba(38, 166, 154, 1)';
+                                ctx.lineWidth = 1 * scope.horizontalPixelRatio;
+                                ctx.stroke();
+                            });
+                        });
+                    }
+                };
+            }
+        }];
+    }
 }
 
-function detectAreas(data, ema, settings) {
-    let areas = [];
-    if (!settings.enabled || currentTimeframe !== '4h') return areas;
-    
-    for (let i = 1; i < data.length; i++) {
-        let candle = data[i];
-        let prevCandle = data[i-1];
-        let currentEma = ema[i];
-        if (currentEma === null) continue;
-        
-        let isDowntrend = candle.close < currentEma;
-        let isUptrend = candle.close > currentEma;
-        
-        // Downtrend -> Looking for Pullback (Green) -> Results in SHORT AREA (Supply)
-        if (isDowntrend) {
-            let isGreen = candle.close > candle.open;
-            if (isGreen && prevCandle.close <= prevCandle.open) {
-                let lookbackStart = Math.max(0, i - settings.maxLookback);
-                let lowestLow = candle.low;
-                let lowestIndex = i;
-                for (let j = i; j >= lookbackStart; j--) {
-                    if (data[j].low < lowestLow) {
-                        lowestLow = data[j].low;
-                        lowestIndex = j;
-                    }
-                }
-                
-                let highestHigh = candle.high;
-                let highestIndex = i;
-                let k = i + 1;
-                let counterMovementEnded = false;
-                
-                for (; k < data.length; k++) {
-                    let nextCandle = data[k];
-                    if (nextCandle.high > highestHigh) {
-                        highestHigh = nextCandle.high;
-                        highestIndex = k;
-                    }
-                    if (nextCandle.close < lowestLow) { // confirmed close below area bottom
-                        counterMovementEnded = true;
-                        break;
-                    }
-                }
-                
-                if (counterMovementEnded) {
-                    let percentMovement = ((highestHigh - lowestLow) / lowestLow) * 100;
-                    if (percentMovement <= settings.maxPercent) {
-                        areas.push({
-                            type: 'short', // Downtrend pullback creates a SHORT area
-                            box_start_time: data[highestIndex].time, // Start at the extremum
-                            top: highestHigh,
-                            bottom: lowestLow,
-                            pullback_start_time: data[lowestIndex].time,
-                            pullback_start_price: lowestLow
-                        });
-                        i = k; // skip ahead
-                    }
-                }
-            }
-        }
-        // Uptrend -> Looking for Pullback (Red) -> Results in LONG AREA (Demand)
-        else if (isUptrend) {
-            let isRed = candle.close < candle.open;
-            if (isRed && prevCandle.close >= prevCandle.open) {
-                let lookbackStart = Math.max(0, i - settings.maxLookback);
-                let highestHigh = candle.high;
-                let highestIndex = i;
-                for (let j = i; j >= lookbackStart; j--) {
-                    if (data[j].high > highestHigh) {
-                        highestHigh = data[j].high;
-                        highestIndex = j;
-                    }
-                }
-                
-                let lowestLow = candle.low;
-                let lowestIndex = i;
-                let k = i + 1;
-                let counterMovementEnded = false;
-                
-                for (; k < data.length; k++) {
-                    let nextCandle = data[k];
-                    if (nextCandle.low < lowestLow) {
-                        lowestLow = nextCandle.low;
-                        lowestIndex = k;
-                    }
-                    if (nextCandle.close > highestHigh) { // confirmed close above area top
-                        counterMovementEnded = true;
-                        break;
-                    }
-                }
-                
-                if (counterMovementEnded) {
-                    let percentMovement = ((highestHigh - lowestLow) / lowestLow) * 100;
-                    if (percentMovement <= settings.maxPercent) {
-                        areas.push({
-                            type: 'long', // Uptrend pullback creates a LONG area
-                            box_start_time: data[lowestIndex].time, // Start at the extremum
-                            top: highestHigh,
-                            bottom: lowestLow,
-                            pullback_start_time: data[highestIndex].time,
-                            pullback_start_price: highestHigh
-                        });
-                        i = k;
-                    }
-                }
-            }
-        }
-    }
-    
-    return areas;
-}
+let tradePrimitive = new TradePrimitive();
+
+
 
 function updateIndicator() {
-    if (!indicatorSettings.enabled || currentTimeframe !== '4h' || currentChartData.length === 0) {
+    if (!indicatorSettings.enabled || currentChartData.length === 0 || !global4HAreas) {
         areaPrimitive.setAreas([]);
+        tradePrimitive.setTrades([]);
         return;
     }
     
-    const ema = calculateEMA(currentChartData, indicatorSettings.emaPeriod);
-    const areas = detectAreas(currentChartData, ema, indicatorSettings);
-    areaPrimitive.setAreas(areas);
+    // Yalnızca ekranda görünen alandaki POI'leri filtrele veya hepsini gönder
+    // Burada 1h/3m ayırt etmeksizin POI'leri ve işlemleri çizebiliriz.
+    // İsterseniz sadece belirli timeframelerde çizebilirsiniz.
+    areaPrimitive.setAreas(global4HAreas);
+    
+    if (window.globalTrades && currentTimeframe !== '4h' && currentTimeframe !== '1d') {
+        tradePrimitive.setTrades(window.globalTrades);
+    } else {
+        tradePrimitive.setTrades([]);
+    }
 }
 
 
@@ -310,7 +314,8 @@ function initChart() {
         });
         
         candlestickSeries.attachPrimitive(areaPrimitive);
-
+        candlestickSeries.attachPrimitive(tradePrimitive);
+        
         window.addEventListener('resize', () => {
             if (chart && chartContainer) {
                 chart.resize(chartContainer.clientWidth, chartContainer.clientHeight);
@@ -460,6 +465,7 @@ tfButtons.forEach(btn => {
     try {
         console.log("Starting application...");
         initChart();
+        await recalc4HAreas();
         await loadChartData(currentTimeframe);
     } catch (e) {
         console.error("Başlatma hatası:", e);
@@ -493,6 +499,7 @@ function applySettings() {
     indicatorSettings.emaPeriod = parseInt(emaPeriodInput.value) || 100;
     indicatorSettings.maxLookback = parseInt(maxLookbackInput.value) || 6;
     indicatorSettings.maxPercent = parseInt(maxPercentInput.value) || 15;
+    recalc4HAreas();
     updateIndicator();
 }
 
