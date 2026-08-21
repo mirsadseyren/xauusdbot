@@ -59,13 +59,7 @@ class AreaPrimitive {
                                 const startX = timeScale.timeToCoordinate(area.box_start_time);
                                 if (startX === null) return;
                                 
-                                let endX = scope.bitmapSize.width;
-                                if (area.box_end_time) {
-                                    const coord = timeScale.timeToCoordinate(area.box_end_time);
-                                    if (coord !== null) {
-                                        endX = coord * scope.horizontalPixelRatio;
-                                    }
-                                }
+                                const endX = scope.bitmapSize.width;
                                 const topY = _this.series.priceToCoordinate(area.top);
                                 const bottomY = _this.series.priceToCoordinate(area.bottom);
                                 
@@ -189,18 +183,9 @@ function detectAreas(data, ema, settings) {
                 if (counterMovementEnded) {
                     let percentMovement = ((highestHigh - lowestLow) / lowestLow) * 100;
                     if (percentMovement <= settings.maxPercent) {
-                        let box_end_time = null;
-                        for (let m = k + 1; m < data.length; m++) {
-                            if (data[m].high >= lowestLow) {
-                                box_end_time = data[m].time;
-                                break;
-                            }
-                        }
-                        
                         areas.push({
                             type: 'short', // Downtrend pullback creates a SHORT area
                             box_start_time: data[highestIndex].time, // Start at the extremum
-                            box_end_time: box_end_time,
                             top: highestHigh,
                             bottom: lowestLow,
                             pullback_start_time: data[lowestIndex].time,
@@ -245,18 +230,9 @@ function detectAreas(data, ema, settings) {
                 if (counterMovementEnded) {
                     let percentMovement = ((highestHigh - lowestLow) / lowestLow) * 100;
                     if (percentMovement <= settings.maxPercent) {
-                        let box_end_time = null;
-                        for (let m = k + 1; m < data.length; m++) {
-                            if (data[m].low <= highestHigh) {
-                                box_end_time = data[m].time;
-                                break;
-                            }
-                        }
-                        
                         areas.push({
                             type: 'long', // Uptrend pullback creates a LONG area
                             box_start_time: data[lowestIndex].time, // Start at the extremum
-                            box_end_time: box_end_time,
                             top: highestHigh,
                             bottom: lowestLow,
                             pullback_start_time: data[highestIndex].time,
