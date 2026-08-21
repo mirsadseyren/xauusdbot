@@ -59,11 +59,33 @@ class AreaPrimitive {
                                 const startX = timeScale.timeToCoordinate(area.box_start_time);
                                 if (startX === null) return;
                                 
-                                const endX = scope.bitmapSize.width;
+                                let endX = scope.bitmapSize.width;
+                                if (area.box_end_time) {
+                                    const coord = timeScale.timeToCoordinate(area.box_end_time);
+                                    if (coord !== null) {
+                                        endX = coord * scope.horizontalPixelRatio;
+                                    }
+                                }
                                 const topY = _this.series.priceToCoordinate(area.top);
                                 const bottomY = _this.series.priceToCoordinate(area.bottom);
                                 
                                 if (topY !== null && bottomY !== null) {
+                                    const pullbackStartX = timeScale.timeToCoordinate(area.pullback_start_time);
+                                    const pullbackY = _this.series.priceToCoordinate(area.pullback_start_price);
+                                    
+                                    // Draw dotted line for the pullback movement
+                                    if (pullbackStartX !== null && pullbackY !== null) {
+                                        const extremumY = area.type === 'short' ? topY : bottomY;
+                                        ctx.beginPath();
+                                        ctx.setLineDash([5, 5]);
+                                        ctx.moveTo(pullbackStartX * scope.horizontalPixelRatio, pullbackY * scope.verticalPixelRatio);
+                                        ctx.lineTo(startX * scope.horizontalPixelRatio, extremumY * scope.verticalPixelRatio);
+                                        ctx.strokeStyle = area.type === 'long' ? 'rgba(38, 166, 154, 0.8)' : 'rgba(239, 83, 80, 0.8)';
+                                        ctx.lineWidth = 1.5 * scope.horizontalPixelRatio;
+                                        ctx.stroke();
+                                        ctx.setLineDash([]);
+                                    }
+
                                     const x = Math.max(0, startX * scope.horizontalPixelRatio);
                                     const y = Math.min(topY, bottomY) * scope.verticalPixelRatio;
                                     const w = endX - x;
@@ -167,11 +189,22 @@ function detectAreas(data, ema, settings) {
                 if (counterMovementEnded) {
                     let percentMovement = ((highestHigh - lowestLow) / lowestLow) * 100;
                     if (percentMovement <= settings.maxPercent) {
+                        let box_end_time = null;
+                        for (let m = k + 1; m < data.length; m++) {
+                            if (data[m].high >= lowestLow) {
+                                box_end_time = data[m].time;
+                                break;
+                            }
+                        }
+                        
                         areas.push({
                             type: 'short', // Downtrend pullback creates a SHORT area
                             box_start_time: data[highestIndex].time, // Start at the extremum
+                            box_end_time: box_end_time,
                             top: highestHigh,
                             bottom: lowestLow,
+                            pullback_start_time: data[lowestIndex].time,
+                            pullback_start_price: lowestLow
                         });
                         i = k; // skip ahead
                     }
@@ -212,11 +245,22 @@ function detectAreas(data, ema, settings) {
                 if (counterMovementEnded) {
                     let percentMovement = ((highestHigh - lowestLow) / lowestLow) * 100;
                     if (percentMovement <= settings.maxPercent) {
+                        let box_end_time = null;
+                        for (let m = k + 1; m < data.length; m++) {
+                            if (data[m].low <= highestHigh) {
+                                box_end_time = data[m].time;
+                                break;
+                            }
+                        }
+                        
                         areas.push({
                             type: 'long', // Uptrend pullback creates a LONG area
                             box_start_time: data[lowestIndex].time, // Start at the extremum
+                            box_end_time: box_end_time,
                             top: highestHigh,
                             bottom: lowestLow,
+                            pullback_start_time: data[highestIndex].time,
+                            pullback_start_price: highestHigh
                         });
                         i = k;
                     }
