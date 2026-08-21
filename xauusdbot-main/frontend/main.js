@@ -8,6 +8,45 @@ let currentChartData = [];
 let data4H = [];
 let global4HAreas = [];
 
+async function fetchRangeOHLC(tf, startTime, endTime = null) {
+    let url = `/api/ohlc?timeframe=${tf}&start_time=${startTime}`;
+    if (endTime) {
+        url += `&end_time=${endTime}`;
+    }
+    const res = await fetch(url);
+    const data = await res.json();
+    return data;
+}
+
+function updatePrimitiveTimestamps() {
+    if (!currentChartData || currentChartData.length === 0) return;
+    
+    if (global4HAreas) {
+        global4HAreas.forEach(area => {
+            let startIndex = currentChartData.findIndex(c => c.time >= area.box_start_time);
+            if (startIndex !== -1) area.display_start_time = currentChartData[startIndex].time;
+            
+            if (area.end_time) {
+                let endIndex = currentChartData.findIndex(c => c.time >= area.end_time);
+                if (endIndex !== -1) area.display_end_time = currentChartData[endIndex].time;
+            }
+        });
+    }
+    
+    if (window.globalTrades) {
+        window.globalTrades.forEach(t => {
+            if (t.entry_time) {
+                let entryIndex = currentChartData.findIndex(c => c.time >= t.entry_time);
+                if (entryIndex !== -1) t.display_entry_time = currentChartData[entryIndex].time;
+            }
+            if (t.close_time) {
+                let closeIndex = currentChartData.findIndex(c => c.time >= t.close_time);
+                if (closeIndex !== -1) t.display_close_time = currentChartData[closeIndex].time;
+            }
+        });
+    }
+}
+
 async function recalc4HAreas() {
     try {
         const res = await fetch('/api/backtest-results');
@@ -31,7 +70,10 @@ async function recalc4HAreas() {
                 status: t.status,
                 direction: t.direction
             }));
+            
             console.log(`Loaded ${global4HAreas.length} POIs and ${window.globalTrades.length} trades from backend.`);
+            
+            updatePrimitiveTimestamps();
             renderTradesList();
         }
     } catch(e) {
@@ -99,12 +141,22 @@ async function jumpToTrade(time) {
     if (targetIndex === -1 || targetIndex < 100) {
         showLoading(true);
         try {
-            const data = await fetchOHLC('3m', time + 5*24*60*60); // fetch up to 5 days after the trade
+            // Alanın tamamını (POI) görebilmek için işlemden 10 gün öncesine kadar veri çekiyoruz
+            const data = await fetchRangeOHLC('3m', time - 10*24*60*60, time + 5*24*60*60);
             if (data && data.length > 0) {
                 currentChartData = data;
                 candlestickSeries.setData(currentChartData);
                 earliestDataTime = currentChartData[0].time;
+                
+                // Wait for the chart to process the new data visually
+                await new Promise(r => requestAnimationFrame(r));
+                
+                updatePrimitiveTimestamps(); // VERY IMPORTANT: Recalculate timestamps for new data
                 updateIndicator();
+                
+                // Wait again for custom primitives to be added
+                await new Promise(r => requestAnimationFrame(r));
+                
                 targetIndex = currentChartData.findIndex(c => c.time >= time);
             }
         } catch (e) {
@@ -118,6 +170,10 @@ async function jumpToTrade(time) {
             from: targetIndex - 50,
             to: targetIndex + 50
         });
+        // Wait for time scale to update before autoscaling
+        setTimeout(() => {
+            chart.priceScale('right').applyOptions({ autoScale: true });
+        }, 50);
     }
 }
 
@@ -186,6 +242,10 @@ class AreaPrimitive {
                                     let rawEndX = timeScale.timeToCoordinate(displayEndTime);
                                     if (rawEndX !== null) {
                                         endX = rawEndX * scope.horizontalPixelRatio;
+                                    } else {
+                                        if (currentChartData.length > 0 && displayEndTime < currentChartData[0].time) {
+                                            endX = -9999;
+                                        }
                                     }
                                 }
                                 
@@ -297,9 +357,14 @@ class TradePrimitive {
                                 
                                 let endX = scope.bitmapSize.width;
                                 if (trade.close_time) {
-                                    let rawEndX = timeScale.timeToCoordinate(trade.close_time);
+                                    let displayEndTime = trade.display_close_time || trade.close_time;
+                                    let rawEndX = timeScale.timeToCoordinate(displayEndTime);
                                     if (rawEndX !== null) {
                                         endX = rawEndX * scope.horizontalPixelRatio;
+                                    } else {
+                                        if (currentChartData.length > 0 && displayEndTime < currentChartData[0].time) {
+                                            endX = -9999;
+                                        }
                                     }
                                 }
                                 
@@ -332,6 +397,15 @@ class TradePrimitive {
                                 ctx.strokeStyle = 'rgba(38, 166, 154, 1)';
                                 ctx.lineWidth = 1 * scope.horizontalPixelRatio;
                                 ctx.stroke();
+                                
+                                // Right vertical closing line for trade boxes
+                                if (trade.close_time) {
+                                    ctx.beginPath();
+                                    ctx.moveTo(startX + w, Math.min(entryY, slY, tpY));
+                                    ctx.lineTo(startX + w, Math.max(entryY, slY, tpY));
+                                    ctx.strokeStyle = trade.status === 'win' ? 'rgba(38, 166, 154, 0.8)' : 'rgba(239, 83, 80, 0.8)';
+                                    ctx.stroke();
+                                }
                             });
                         });
                     }

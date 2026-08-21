@@ -79,6 +79,22 @@ class TradingEngine:
                     if is_choch:
                         # STATE 3: Risk Doğrulaması (Risk Validation)
                         entry_price = current_close
+                        
+                        # Entry fiyatı POI zone içinde olmalı
+                        # LONG: entry <= poi.top  (fiyat hâlâ demand zone'unun içinde/altında)
+                        # SHORT: entry >= poi.bottom (fiyat hâlâ supply zone'unun içinde/üstünde)
+                        entry_inside_zone = False
+                        if poi.poi_type == POIType.LONG and entry_price <= poi.top:
+                            entry_inside_zone = True
+                        elif poi.poi_type == POIType.SHORT and entry_price >= poi.bottom:
+                            entry_inside_zone = True
+                        
+                        if not entry_inside_zone:
+                            # CHoCH mumu zone dışında kapandı — geçersiz, alanı kapat
+                            poi.status = POIStatus.MITIGATED
+                            poi.end_time = current_time
+                            continue
+                        
                         trade = Trade(poi, entry_price, sl_price, current_time)
                         
                         if trade.is_risk_valid():
