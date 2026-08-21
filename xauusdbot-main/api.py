@@ -118,6 +118,26 @@ async def get_backtest_results():
     except Exception as e:
         return {"error": str(e)}
 
+from pydantic import BaseModel
+
+class BacktestRequest(BaseModel):
+    emaPeriod: int = 100
+    maxLookback: int = 6
+    maxPercent: float = 15.0
+
+@app.post("/api/run-backtest")
+async def api_run_backtest(req: BacktestRequest):
+    import sys
+    sys.path.append(BASE_DIR)
+    from backtester import run_backtest
+    try:
+        data = run_backtest(DATA_PATH, req.emaPeriod, req.maxLookback, req.maxPercent)
+        return data
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return {"error": str(e)}
+
 frontend_dir = os.path.join(BASE_DIR, "frontend")
 if os.path.exists(frontend_dir):
     app.mount("/", StaticFiles(directory=frontend_dir, html=True), name="frontend")

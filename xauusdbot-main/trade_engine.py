@@ -40,7 +40,8 @@ class TradingEngine:
             # 2. Manage Active Trades (Check TP/SL)
             for trade in self.trades:
                 if trade.status == TradeStatus.ACTIVE:
-                    trade.check_exit(current_high, current_low, current_time)
+                    if trade.check_exit(current_high, current_low, current_time):
+                        trade.poi.end_time = trade.exit_time
                     
             # 3. Process Active and Armed POIs
             for poi in list(self.active_pois):
@@ -66,7 +67,7 @@ class TradingEngine:
                 elif poi.status == POIStatus.ARMED:
                     # STATE 2: Alarm ve Onay (Armed & Confirmation)
                     # Check invalidation
-                    if poi.check_invalidation(current_close):
+                    if poi.check_invalidation(current_close, current_time):
                         # INVALIDATED, handled in next loop
                         continue
                         
@@ -87,5 +88,6 @@ class TradingEngine:
                         else:
                             # Risk çok büyük. İşlemi iptal et, alanı kullanıldı işaretle.
                             poi.status = POIStatus.MITIGATED
+                            poi.end_time = current_time
                             
         print(f"Simulation Finished. Processed {len(self.trades)} trades.")

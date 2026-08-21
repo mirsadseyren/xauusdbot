@@ -3,9 +3,10 @@ from models import POI, POIType
 from typing import List
 
 class POIGenerator:
-    def __init__(self, ema_period=100, max_lookback=6):
+    def __init__(self, ema_period=100, max_lookback=6, max_percent=5.0):
         self.ema_period = ema_period
         self.max_lookback = max_lookback
+        self.max_percent = max_percent
 
     def generate_pois(self, df_4h: pd.DataFrame) -> List[POI]:
         """
@@ -74,7 +75,7 @@ class POIGenerator:
                             bottom=lowest_low,
                             poi_type=POIType.SHORT
                         )
-                        if poi.is_valid_size():
+                        if poi.is_valid_size(self.max_percent):
                             pois.append(poi)
                         i = k # Skip to confirmation candle
                         continue
@@ -111,7 +112,7 @@ class POIGenerator:
                             bottom=lowest_low,
                             poi_type=POIType.LONG
                         )
-                        if poi.is_valid_size():
+                        if poi.is_valid_size(self.max_percent):
                             pois.append(poi)
                         i = k
                         continue

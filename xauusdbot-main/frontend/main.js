@@ -16,6 +16,7 @@ async function recalc4HAreas() {
             global4HAreas = data.pois.map(poi => ({
                 type: poi.type,
                 box_start_time: poi.start_time,
+                end_time: poi.end_time,
                 top: poi.top,
                 bottom: poi.bottom,
                 confirmed_time: poi.confirm_time
@@ -31,9 +32,92 @@ async function recalc4HAreas() {
                 direction: t.direction
             }));
             console.log(`Loaded ${global4HAreas.length} POIs and ${window.globalTrades.length} trades from backend.`);
+            renderTradesList();
         }
     } catch(e) {
         console.error("Failed to load backtest results", e);
+    }
+}
+
+function renderTradesList() {
+    const listEl = document.getElementById('trades-list');
+    const winRateEl = document.getElementById('win-rate');
+    const totalEl = document.getElementById('total-trades');
+    if (!listEl || !window.globalTrades) return;
+    
+    listEl.innerHTML = '';
+    let wins = 0;
+    
+    window.globalTrades.forEach((t, index) => {
+        if (t.status === 'win') wins++;
+        
+        const item = document.createElement('div');
+        item.className = `trade-item ${t.status}`;
+        
+        const dateStr = new Date(t.entry_time * 1000).toLocaleString('tr-TR', {
+            day: '2-digit', month: '2-digit', year: 'numeric',
+            hour: '2-digit', minute: '2-digit'
+        });
+        
+        item.innerHTML = `
+            <div class="trade-header">
+                <span>#${index + 1} ${t.direction.toUpperCase()}</span>
+                <span class="${t.status}-text">${t.status.toUpperCase()}</span>
+            </div>
+            <div class="trade-details">
+                <span>Entry: ${t.trade_entry.toFixed(2)}</span>
+                <span>Date: ${dateStr}</span>
+                <span>TP: ${t.trade_tp.toFixed(2)}</span>
+                <span>SL: ${t.trade_sl.toFixed(2)}</span>
+            </div>
+        `;
+        
+        item.addEventListener('click', () => jumpToTrade(t.entry_time));
+        listEl.appendChild(item);
+    });
+    
+    totalEl.textContent = `Total: ${window.globalTrades.length}`;
+    if (window.globalTrades.length > 0) {
+        winRateEl.textContent = `Win Rate: ${((wins / window.globalTrades.length) * 100).toFixed(1)}%`;
+    }
+}
+
+async function jumpToTrade(time) {
+    if (currentTimeframe !== '3m') {
+        const btn = Array.from(document.querySelectorAll('.tf-btn')).find(b => b.getAttribute('data-tf') === '3m');
+        if (btn) btn.click();
+        
+        // Wait for data to load
+        await new Promise(r => setTimeout(r, 800));
+    }
+    
+    if (!chart || !currentChartData || currentChartData.length === 0) return;
+    
+    let targetIndex = currentChartData.findIndex(c => c.time >= time);
+    
+    // If not in current data, we need to fetch historical data around that time
+    if (targetIndex === -1 || targetIndex < 100) {
+        showLoading(true);
+        try {
+            const data = await fetchOHLC('3m', time + 5*24*60*60); // fetch up to 5 days after the trade
+            if (data && data.length > 0) {
+                currentChartData = data;
+                candlestickSeries.setData(currentChartData);
+                earliestDataTime = currentChartData[0].time;
+                updateIndicator();
+                targetIndex = currentChartData.findIndex(c => c.time >= time);
+            }
+        } catch (e) {
+            console.error("Failed to load historical data for trade jump", e);
+        }
+        showLoading(false);
+    }
+    
+    if (targetIndex !== -1) {
+        chart.timeScale().setVisibleLogicalRange({
+            from: targetIndex - 50,
+            to: targetIndex + 50
+        });
     }
 }
 
@@ -96,8 +180,15 @@ class AreaPrimitive {
                                         return;
                                     }
                                 }
+                                let endX = scope.bitmapSize.width;
+                                if (area.end_time) {
+                                    let displayEndTime = area.display_end_time || area.end_time;
+                                    let rawEndX = timeScale.timeToCoordinate(displayEndTime);
+                                    if (rawEndX !== null) {
+                                        endX = rawEndX * scope.horizontalPixelRatio;
+                                    }
+                                }
                                 
-                                const endX = scope.bitmapSize.width;
                                 const topY = _this.series.priceToCoordinate(area.top);
                                 const bottomY = _this.series.priceToCoordinate(area.bottom);
                                 
@@ -114,20 +205,30 @@ class AreaPrimitive {
                                         : 'rgba(239, 83, 80, 0.15)';
                                     
                                     ctx.fillRect(x, y, w, h);
-                                    
                                     ctx.strokeStyle = area.type === 'long' 
                                         ? 'rgba(38, 166, 154, 0.5)' 
                                         : 'rgba(239, 83, 80, 0.5)';
                                     ctx.lineWidth = 1 * scope.horizontalPixelRatio;
                                     
                                     ctx.beginPath();
+                                    // Top border
                                     ctx.moveTo(x, y);
                                     ctx.lineTo(x + w, y);
-                                    ctx.stroke();
                                     
-                                    ctx.beginPath();
+                                    // Bottom border
                                     ctx.moveTo(x, y + h);
                                     ctx.lineTo(x + w, y + h);
+                                    
+                                    // Right border (if area has ended)
+                                    if (area.end_time) {
+                                        ctx.moveTo(x + w, y);
+                                        ctx.lineTo(x + w, y + h);
+                                    }
+                                    
+                                    // Left border
+                                    ctx.moveTo(x, y);
+                                    ctx.lineTo(x, y + h);
+                                    
                                     ctx.stroke();
                                 }
                             });
@@ -251,13 +352,35 @@ function updateIndicator() {
         return;
     }
     
-    // Yalnızca ekranda görünen alandaki POI'leri filtrele veya hepsini gönder
-    // Burada 1h/3m ayırt etmeksizin POI'leri ve işlemleri çizebiliriz.
-    // İsterseniz sadece belirli timeframelerde çizebilirsiniz.
-    areaPrimitive.setAreas(global4HAreas);
+    let areas = global4HAreas.map(area => ({...area}));
+    
+    areas.forEach(area => {
+        let startIndex = currentChartData.findIndex(c => c.time >= area.box_start_time);
+        if (startIndex !== -1) {
+            area.display_start_time = currentChartData[startIndex].time;
+        }
+        if (area.end_time) {
+            let endIndex = currentChartData.findIndex(c => c.time >= area.end_time);
+            if (endIndex !== -1) {
+                area.display_end_time = currentChartData[endIndex].time;
+            }
+        }
+    });
+    
+    areaPrimitive.setAreas(areas);
     
     if (window.globalTrades && currentTimeframe !== '4h' && currentTimeframe !== '1d') {
-        tradePrimitive.setTrades(window.globalTrades);
+        let trades = window.globalTrades.map(t => ({...t}));
+        trades.forEach(t => {
+            let entryIndex = currentChartData.findIndex(c => c.time >= t.entry_time);
+            if (entryIndex !== -1) t.display_entry_time = currentChartData[entryIndex].time;
+            
+            if (t.close_time) {
+                let closeIndex = currentChartData.findIndex(c => c.time >= t.close_time);
+                if (closeIndex !== -1) t.display_close_time = currentChartData[closeIndex].time;
+            }
+        });
+        tradePrimitive.setTrades(trades);
     } else {
         tradePrimitive.setTrades([]);
     }
@@ -504,7 +627,57 @@ function applySettings() {
 }
 
 if (toggleAreasInput) toggleAreasInput.addEventListener('change', applySettings);
-if (emaPeriodInput) emaPeriodInput.addEventListener('change', applySettings);
-if (maxLookbackInput) maxLookbackInput.addEventListener('change', applySettings);
-if (maxPercentInput) maxPercentInput.addEventListener('change', applySettings);
+// Parameters are now submitted via the Run Backtest button
+
+const runBacktestBtn = document.getElementById('run-backtest-btn');
+if (runBacktestBtn) {
+    runBacktestBtn.addEventListener('click', async () => {
+        indicatorMenu.classList.add('hidden');
+        showLoading(true);
+        try {
+            const reqBody = {
+                emaPeriod: parseInt(emaPeriodInput.value) || 100,
+                maxLookback: parseInt(maxLookbackInput.value) || 6,
+                maxPercent: parseFloat(maxPercentInput.value) || 15.0
+            };
+            
+            const res = await fetch('/api/run-backtest', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(reqBody)
+            });
+            
+            const data = await res.json();
+            if (data && !data.error) {
+                global4HAreas = data.pois.map(poi => ({
+                    type: poi.type,
+                    box_start_time: poi.start_time,
+                    end_time: poi.end_time,
+                    top: poi.top,
+                    bottom: poi.bottom,
+                    confirmed_time: poi.confirm_time
+                }));
+                
+                window.globalTrades = data.trades.map(t => ({
+                    entry_time: t.entry_time,
+                    close_time: t.exit_time,
+                    trade_entry: t.entry_price,
+                    trade_sl: t.sl_price,
+                    trade_tp: t.tp_price,
+                    status: t.status,
+                    direction: t.direction
+                }));
+                
+                renderTradesList();
+                updateIndicator();
+            } else {
+                alert("Error running backtest: " + (data.error || "Unknown"));
+            }
+        } catch (e) {
+            console.error(e);
+            alert("Network error running backtest.");
+        }
+        showLoading(false);
+    });
+}
 

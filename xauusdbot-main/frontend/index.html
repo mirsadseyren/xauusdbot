@@ -54,16 +54,35 @@
                         <label for="max-percent">Max Movement (%)</label>
                         <input type="number" id="max-percent" value="15" min="1" max="50">
                     </div>
+                    <div class="setting-row">
+                        <button id="run-backtest-btn" class="primary-btn">Run Backtest</button>
+                    </div>
                 </div>
             </div>
         </header>
         
-        <main class="chart-container">
-            <div id="loading" class="loading-overlay hidden">
-                <div class="spinner"></div>
-            </div>
-            <div id="chart"></div>
-        </main>
+        <div class="main-content">
+            <main class="chart-container">
+                <div id="loading" class="loading-overlay hidden">
+                    <div class="spinner"></div>
+                    <div id="loading-text" style="margin-top: 15px; color: #26a69a; font-weight: 500;">Yükleniyor...</div>
+                </div>
+                <div id="chart"></div>
+            </main>
+            
+            <aside class="trades-panel" id="trades-panel">
+                <div class="trades-header">
+                    <h3>Trades</h3>
+                    <div class="stats">
+                        <span id="win-rate">Win Rate: 0%</span>
+                        <span id="total-trades">Total: 0</span>
+                    </div>
+                </div>
+                <div class="trades-list" id="trades-list">
+                    <!-- Trades will be injected here -->
+                </div>
+            </aside>
+        </div>
     </div>
 
     <!-- Lightweight Charts library -->

@@ -26,24 +26,27 @@ class POI:
         self.bottom = bottom
         self.poi_type = poi_type
         self.status = POIStatus.ACTIVE
+        self.end_time = None
         
-    def is_valid_size(self) -> bool:
-        """KURAL 1 - Maksimum Alan Boyutu (%5 Kuralı)"""
+    def is_valid_size(self, max_percent: float = 5.0) -> bool:
+        """KURAL 1 - Maksimum Alan Boyutu Kuralı"""
         size_pct = ((self.top - self.bottom) / self.bottom) * 100
-        return size_pct <= 5.0
+        return size_pct <= max_percent
         
     def is_price_inside(self, price: float) -> bool:
         return self.bottom <= price <= self.top
         
-    def check_invalidation(self, current_close: float) -> bool:
+    def check_invalidation(self, current_close: float, current_time) -> bool:
         """
         Alanın içinde hiç işlem vermeden komple alanın içinden geçilip ihlal edilirse de alan geçersizleşir.
         """
         if self.poi_type == POIType.LONG and current_close < self.bottom:
             self.status = POIStatus.INVALIDATED
+            self.end_time = current_time
             return True
         if self.poi_type == POIType.SHORT and current_close > self.top:
             self.status = POIStatus.INVALIDATED
+            self.end_time = current_time
             return True
         return False
         

@@ -6,7 +6,7 @@ from poi_generator import POIGenerator
 from trade_engine import TradingEngine
 from models import TradeStatus
 
-def run_backtest(data_path: str):
+def run_backtest(data_path: str, ema_period: int = 100, max_lookback: int = 6, max_percent: float = 15.0):
     start_time = time.time()
     
     # 1. Veri Yükleme ve Hazırlama
@@ -18,7 +18,7 @@ def run_backtest(data_path: str):
         return
         
     print("Generating 4H POIs...")
-    poi_gen = POIGenerator(ema_period=100, max_lookback=6)
+    poi_gen = POIGenerator(ema_period=ema_period, max_lookback=max_lookback, max_percent=max_percent)
     all_pois = poi_gen.generate_pois(loader.df_4h)
     
     print(f"Total valid 4H POIs generated: {len(all_pois)}")
@@ -70,7 +70,8 @@ def run_backtest(data_path: str):
             "top": poi.top,
             "bottom": poi.bottom,
             "confirm_time": int(poi.confirm_time.value // 1_000_000_000),
-            "start_time": int(poi.start_time.value // 1_000_000_000)
+            "start_time": int(poi.start_time.value // 1_000_000_000),
+            "end_time": int(poi.end_time.value // 1_000_000_000) if poi.end_time else None
         })
         
     for t in engine.trades:
@@ -90,6 +91,7 @@ def run_backtest(data_path: str):
     print(f"Detailed trade log saved to {output_file}")
     print(f"Frontend JSON data saved to {json_file}")
     print(f"Total Execution Time: {time.time() - start_time:.2f} seconds")
+    return json_data
 
 if __name__ == "__main__":
     BASE_DIR = os.path.dirname(os.path.abspath(__file__))
