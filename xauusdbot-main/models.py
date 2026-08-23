@@ -30,6 +30,9 @@ class POI:
         self.status = POIStatus.ACTIVE
         self.end_time = None
         self.choch_sl_price = None
+        self.origin_time = None    # Signal candle time (where the pattern was first detected)
+        self.origin_price = None   # Price at origin (start of the impulse move)
+        self.confirm_price = None  # Close price at confirmation candle
         
     def is_valid_size(self, max_percent: float = 5.0) -> bool:
         """KURAL 1 - Maksimum Alan Boyutu Kuralı"""

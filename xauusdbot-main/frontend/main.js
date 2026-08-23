@@ -63,7 +63,10 @@ async function recalc4HAreas() {
                 end_time: poi.end_time ? poi.end_time - tzOffsetSeconds : null,
                 top: poi.top,
                 bottom: poi.bottom,
-                confirmed_time: poi.confirm_time - tzOffsetSeconds
+                confirmed_time: poi.confirm_time - tzOffsetSeconds,
+                origin_time: poi.origin_time ? poi.origin_time - tzOffsetSeconds : null,
+                origin_price: poi.origin_price,
+                confirm_price: poi.confirm_price
             }));
             
             window.globalTrades = data.trades.map(t => ({
@@ -196,6 +199,7 @@ const indicatorSettings = {
     showInvalidAreas: true,
     showTrades: true,
     showChoch: true,
+    showFormation: true,
     emaPeriod: 100,
     maxLookback: 6,
     maxPercent: 15
@@ -306,6 +310,49 @@ class AreaPrimitive {
                                     ctx.lineTo(x, y + h);
                                     
                                     ctx.stroke();
+                                }
+                                
+                                // Draw formation impulse line (origin → area start)
+                                if (indicatorSettings.showFormation && area.origin_price != null) {
+                                    const originX_raw = timeScale.timeToCoordinate(area.origin_time);
+                                    const startX_raw = timeScale.timeToCoordinate(area.display_start_time || area.box_start_time);
+                                    
+                                    if (originX_raw !== null && startX_raw !== null) {
+                                        const oX = originX_raw * scope.horizontalPixelRatio;
+                                        const sX = startX_raw * scope.horizontalPixelRatio;
+                                        const oY = _this.series.priceToCoordinate(area.origin_price) * scope.verticalPixelRatio;
+                                        // Area start price: SHORT = top (highest_high), LONG = bottom (lowest_low)
+                                        const sY = _this.series.priceToCoordinate(
+                                            area.type === 'long' ? area.bottom : area.top
+                                        ) * scope.verticalPixelRatio;
+                                        
+                                        const lineColor = area.type === 'long'
+                                            ? 'rgba(38, 166, 154, 0.9)'
+                                            : 'rgba(239, 83, 80, 0.9)';
+                                        
+                                        ctx.beginPath();
+                                        ctx.moveTo(oX, oY);
+                                        ctx.lineTo(sX, sY);
+                                        ctx.strokeStyle = lineColor;
+                                        ctx.lineWidth = 2 * scope.horizontalPixelRatio;
+                                        ctx.setLineDash([]);
+                                        ctx.stroke();
+                                        
+                                        // Origin dot (start of impulse)
+                                        ctx.beginPath();
+                                        ctx.arc(oX, oY, 3 * scope.horizontalPixelRatio, 0, 2 * Math.PI);
+                                        ctx.fillStyle = '#ffffff';
+                                        ctx.fill();
+                                        ctx.strokeStyle = lineColor;
+                                        ctx.lineWidth = 1.5 * scope.horizontalPixelRatio;
+                                        ctx.stroke();
+                                        
+                                        // Area start dot
+                                        ctx.beginPath();
+                                        ctx.arc(sX, sY, 3 * scope.horizontalPixelRatio, 0, 2 * Math.PI);
+                                        ctx.fillStyle = lineColor;
+                                        ctx.fill();
+                                    }
                                 }
                             });
                         });
@@ -744,6 +791,7 @@ const toggleValidAreasInput = document.getElementById('toggle-valid-areas');
 const toggleInvalidAreasInput = document.getElementById('toggle-invalid-areas');
 const toggleTradesInput = document.getElementById('toggle-trades');
 const toggleChochInput = document.getElementById('toggle-choch');
+const toggleFormationInput = document.getElementById('toggle-formation');
 const emaPeriodInput = document.getElementById('ema-period');
 const maxLookbackInput = document.getElementById('max-lookback');
 const maxPercentInput = document.getElementById('max-percent');
@@ -765,6 +813,7 @@ function applySettings() {
     indicatorSettings.showInvalidAreas = toggleInvalidAreasInput ? toggleInvalidAreasInput.checked : true;
     indicatorSettings.showTrades = toggleTradesInput ? toggleTradesInput.checked : true;
     indicatorSettings.showChoch = toggleChochInput ? toggleChochInput.checked : true;
+    indicatorSettings.showFormation = toggleFormationInput ? toggleFormationInput.checked : true;
     indicatorSettings.emaPeriod = parseInt(emaPeriodInput.value) || 100;
     indicatorSettings.maxLookback = parseInt(maxLookbackInput.value) || 6;
     indicatorSettings.maxPercent = parseInt(maxPercentInput.value) || 15;
@@ -776,6 +825,7 @@ if (toggleValidAreasInput) toggleValidAreasInput.addEventListener('change', appl
 if (toggleInvalidAreasInput) toggleInvalidAreasInput.addEventListener('change', applySettings);
 if (toggleTradesInput) toggleTradesInput.addEventListener('change', applySettings);
 if (toggleChochInput) toggleChochInput.addEventListener('change', applySettings);
+if (toggleFormationInput) toggleFormationInput.addEventListener('change', applySettings);
 // Parameters are now submitted via the Run Backtest button
 
 const runBacktestBtn = document.getElementById('run-backtest-btn');
@@ -805,7 +855,10 @@ if (runBacktestBtn) {
                     end_time: poi.end_time ? poi.end_time - tzOffsetSeconds : null,
                     top: poi.top,
                     bottom: poi.bottom,
-                    confirmed_time: poi.confirm_time - tzOffsetSeconds
+                    confirmed_time: poi.confirm_time - tzOffsetSeconds,
+                    origin_time: poi.origin_time ? poi.origin_time - tzOffsetSeconds : null,
+                    origin_price: poi.origin_price,
+                    confirm_price: poi.confirm_price
                 }));
                 
                 window.globalTrades = data.trades.map(t => ({

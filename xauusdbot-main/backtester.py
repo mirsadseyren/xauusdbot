@@ -71,8 +71,11 @@ def run_backtest(data_path: str, ema_period: int = 100, max_lookback: int = 6, m
             "top": poi.top,
             "bottom": poi.bottom,
             "confirm_time": int(poi.confirm_time.value // 1_000_000_000),
+            "confirm_price": poi.confirm_price,
             "start_time": int(poi.start_time.value // 1_000_000_000),
-            "end_time": int(poi.end_time.value // 1_000_000_000) if poi.end_time else None
+            "end_time": int(poi.end_time.value // 1_000_000_000) if poi.end_time else None,
+            "origin_time": int(poi.origin_time.value // 1_000_000_000) if poi.origin_time else None,
+            "origin_price": poi.origin_price
         })
         
     for t in engine.trades:

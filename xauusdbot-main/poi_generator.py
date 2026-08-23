@@ -77,6 +77,9 @@ class POIGenerator:
                         bottom=lowest_low,
                         poi_type=POIType.SHORT
                     )
+                    poi.origin_time = times[i]
+                    poi.origin_price = lows[i]  # impulse started from this low
+                    poi.confirm_price = closes[k]
                     if poi.is_valid_size(self.max_percent):
                         pois.append(poi)
                     # i=k YOK: Üst üste binen POI'lere izin verir
@@ -115,6 +118,9 @@ class POIGenerator:
                         bottom=lowest_low,
                         poi_type=POIType.LONG
                     )
+                    poi.origin_time = times[i]
+                    poi.origin_price = highs[i]  # impulse started from this high
+                    poi.confirm_price = closes[k]
                     if poi.is_valid_size(self.max_percent):
                         pois.append(poi)
                     # i=k YOK: Üst üste binen POI'lere izin verir
