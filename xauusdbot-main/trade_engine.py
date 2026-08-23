@@ -15,11 +15,15 @@ class TradingEngine:
         # Track entry index for each armed POI
         self.armed_poi_entries = {}
         
+        # Deduplication: (entry_time, round(entry_price,2)) çiftini takip et
+        self._executed_keys: set = set()
+
     def run_simulation(self):
         poi_idx = 0
         total_pois = len(self.all_pois)
         
         closes = self.df_3m['Close'].values
+        opens = self.df_3m['Open'].values
         highs = self.df_3m['High'].values
         lows = self.df_3m['Low'].values
         times = self.df_3m.index
@@ -27,6 +31,7 @@ class TradingEngine:
         for i in range(len(self.df_3m)):
             current_time = times[i]
             current_close = closes[i]
+            current_open = opens[i]
             current_high = highs[i]
             current_low = lows[i]
             
@@ -51,8 +56,19 @@ class TradingEngine:
                         del self.armed_poi_entries[poi.id]
                     continue
                     
+                # Daralma (Shrinking) Mantığı
+                if poi.status in [POIStatus.ARMED, POIStatus.CHOCH_CONFIRMED]:
+                    if poi.poi_type == POIType.LONG and current_low <= poi.top and current_low >= poi.bottom:
+                        poi.top = current_low
+                    elif poi.poi_type == POIType.SHORT and current_high >= poi.bottom and current_high <= poi.top:
+                        poi.bottom = current_high
+
                 if poi.status == POIStatus.ACTIVE:
                     # STATE 1: İzleme (Monitoring)
+                    # Check invalidation BEFORE checking for ARMED
+                    if poi.check_invalidation(current_high, current_low, current_time):
+                        continue
+                        
                     # Fiyatın High veya Low değeri POI içine girdiyse ARMED olur.
                     entered = False
                     if poi.poi_type == POIType.LONG and current_low <= poi.top and current_high >= poi.bottom:
@@ -67,8 +83,7 @@ class TradingEngine:
                 elif poi.status == POIStatus.ARMED:
                     # STATE 2: Alarm ve Onay (Armed & Confirmation)
                     # Check invalidation
-                    if poi.check_invalidation(current_close, current_time):
-                        # INVALIDATED, handled in next loop
+                    if poi.check_invalidation(current_high, current_low, current_time):
                         continue
                         
                     poi_entry_idx = self.armed_poi_entries[poi.id]
@@ -77,30 +92,57 @@ class TradingEngine:
                     )
                     
                     if is_choch:
-                        # STATE 3: Risk Doğrulaması (Risk Validation)
-                        entry_price = current_close
+                        # CHoCH Onaylandı. Artık fiyatın alanı tamamen terk etmesini bekleyeceğiz.
+                        poi.status = POIStatus.CHOCH_CONFIRMED
+                        poi.choch_sl_price = sl_price
                         
-                        # Entry fiyatı POI zone içinde olmalı
-                        # LONG: entry <= poi.top  (fiyat hâlâ demand zone'unun içinde/altında)
-                        # SHORT: entry >= poi.bottom (fiyat hâlâ supply zone'unun içinde/üstünde)
-                        entry_inside_zone = False
-                        if poi.poi_type == POIType.LONG and entry_price <= poi.top:
-                            entry_inside_zone = True
-                        elif poi.poi_type == POIType.SHORT and entry_price >= poi.bottom:
-                            entry_inside_zone = True
+                elif poi.status == POIStatus.CHOCH_CONFIRMED:
+                    # STATE 3: Alanı Terk Etme Beklentisi
+                    if poi.check_invalidation(current_high, current_low, current_time):
+                        continue
                         
-                        if not entry_inside_zone:
-                            # CHoCH mumu zone dışında kapandı — geçersiz, alanı kapat
-                            poi.status = POIStatus.MITIGATED
-                            poi.end_time = current_time
-                            continue
+                    # Fiyat alanı tamamen terk etti mi?
+                    left_area = False
+                    if poi.poi_type == POIType.LONG and current_low > poi.top:
+                        left_area = True
+                    elif poi.poi_type == POIType.SHORT and current_high < poi.bottom:
+                        left_area = True
                         
+                    if left_area:
+                        poi.status = POIStatus.LEFT_AREA
+                        
+                elif poi.status == POIStatus.LEFT_AREA:
+                    # STATE 4: Alana Dönüş ve İşleme Giriş (Touch / Limit Entry)
+                    if poi.check_invalidation(current_high, current_low, current_time):
+                        continue
+                        
+                    # Fiyat daralmış alana tekrar temas etti mi?
+                    touched = False
+                    entry_price = None
+                    
+                    if poi.poi_type == POIType.LONG and current_low <= poi.top:
+                        touched = True
+                        # Eksi gap varsa current_open, yoksa tam sınır noktası (limit emir gibi)
+                        entry_price = current_open if current_open < poi.top else poi.top
+                        
+                    elif poi.poi_type == POIType.SHORT and current_high >= poi.bottom:
+                        touched = True
+                        # Artı gap varsa current_open, yoksa tam sınır noktası
+                        entry_price = current_open if current_open > poi.bottom else poi.bottom
+
+                    if touched:
+                        # CHoCH SL'si (önceki fitil) alanın yeni daralmış sınırına çok yakın olduğu için
+                        # İşlem boyutları çok küçülüyordu. SL olarak alanın orijinal iptal noktasını kullanıyoruz.
+                        sl_price = poi.bottom if poi.poi_type == POIType.LONG else poi.top
                         trade = Trade(poi, entry_price, sl_price, current_time)
                         
                         if trade.is_risk_valid():
-                            # STATE 4: İşlem İletimi (Execution)
-                            self.trades.append(trade)
-                            poi.status = POIStatus.MITIGATED # One-Time Mitigation
+                            # Aynı anda aynı fiyata ikinci kez giriş yapma
+                            trade_key = (current_time, round(entry_price, 2))
+                            if trade_key not in self._executed_keys:
+                                self._executed_keys.add(trade_key)
+                                self.trades.append(trade)
+                            poi.status = POIStatus.MITIGATED # İşleme girildi, alanı kapat
                         else:
                             # Risk çok büyük. İşlemi iptal et, alanı kullanıldı işaretle.
                             poi.status = POIStatus.MITIGATED

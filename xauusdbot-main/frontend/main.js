@@ -1,4 +1,5 @@
 // State
+const tzOffsetSeconds = new Date().getTimezoneOffset() * 60;
 let currentTimeframe = '1h';
 let chart = null;
 let candlestickSeries = null;
@@ -15,6 +16,9 @@ async function fetchRangeOHLC(tf, startTime, endTime = null) {
     }
     const res = await fetch(url);
     const data = await res.json();
+    if (data && !data.error) {
+        return data.map(d => ({...d, time: d.time - tzOffsetSeconds}));
+    }
     return data;
 }
 
@@ -54,16 +58,16 @@ async function recalc4HAreas() {
         if (data && !data.error) {
             global4HAreas = data.pois.map(poi => ({
                 type: poi.type,
-                box_start_time: poi.start_time,
-                end_time: poi.end_time,
+                box_start_time: poi.start_time - tzOffsetSeconds,
+                end_time: poi.end_time ? poi.end_time - tzOffsetSeconds : null,
                 top: poi.top,
                 bottom: poi.bottom,
-                confirmed_time: poi.confirm_time
+                confirmed_time: poi.confirm_time - tzOffsetSeconds
             }));
             
             window.globalTrades = data.trades.map(t => ({
-                entry_time: t.entry_time,
-                close_time: t.exit_time,
+                entry_time: t.entry_time - tzOffsetSeconds,
+                close_time: t.exit_time ? t.exit_time - tzOffsetSeconds : null,
                 trade_entry: t.entry_price,
                 trade_sl: t.sl_price,
                 trade_tp: t.tp_price,
@@ -96,7 +100,10 @@ function renderTradesList() {
         const item = document.createElement('div');
         item.className = `trade-item ${t.status}`;
         
-        const dateStr = new Date(t.entry_time * 1000).toLocaleString('tr-TR', {
+        // Add the tzOffsetSeconds back to get real UTC time, then format as UTC
+        // This ensures the displayed string exactly matches the local time intended.
+        const realUtcTime = (t.entry_time + tzOffsetSeconds) * 1000;
+        const dateStr = new Date(realUtcTime).toLocaleString('tr-TR', {
             day: '2-digit', month: '2-digit', year: 'numeric',
             hour: '2-digit', minute: '2-digit'
         });
@@ -566,7 +573,7 @@ async function fetchOHLC(timeframe, endTime = null) {
         throw new Error(data.error);
     }
     
-    return data || [];
+    return data.map(d => ({...d, time: d.time - tzOffsetSeconds})) || [];
 }
 
 // Load initial data
@@ -725,16 +732,16 @@ if (runBacktestBtn) {
             if (data && !data.error) {
                 global4HAreas = data.pois.map(poi => ({
                     type: poi.type,
-                    box_start_time: poi.start_time,
-                    end_time: poi.end_time,
+                    box_start_time: poi.start_time - tzOffsetSeconds,
+                    end_time: poi.end_time ? poi.end_time - tzOffsetSeconds : null,
                     top: poi.top,
                     bottom: poi.bottom,
-                    confirmed_time: poi.confirm_time
+                    confirmed_time: poi.confirm_time - tzOffsetSeconds
                 }));
                 
                 window.globalTrades = data.trades.map(t => ({
-                    entry_time: t.entry_time,
-                    close_time: t.exit_time,
+                    entry_time: t.entry_time - tzOffsetSeconds,
+                    close_time: t.exit_time ? t.exit_time - tzOffsetSeconds : null,
                     trade_entry: t.entry_price,
                     trade_sl: t.sl_price,
                     trade_tp: t.tp_price,

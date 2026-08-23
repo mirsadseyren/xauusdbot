@@ -24,10 +24,11 @@ def run_optimization():
         
     print("Data loaded. Starting grid search...")
     
-    # Focused grid search around best result: EMA=150, LB=2, MaxMov=30%
-    ema_periods   = [100, 120, 130, 140, 150, 160, 170, 180, 200]
-    max_lookbacks = [1, 2, 3, 4, 5]
-    max_percents  = [20.0, 25.0, 30.0, 35.0, 40.0, 50.0]
+    # Geniş grid: overlapping POI değişikliğiyle çok daha fazla sinyal üretiliyor
+    # MaxPercent yüksek tutularak geniş alanların içinde işlem sayısı artırılıyor
+    ema_periods   = [50, 80, 100, 120, 150, 200]
+    max_lookbacks = [1, 2, 3, 4, 6, 8]
+    max_percents  = [15.0, 20.0, 25.0, 30.0, 40.0, 50.0]
     
     combinations = list(itertools.product(ema_periods, max_lookbacks, max_percents))
     total_combinations = len(combinations)

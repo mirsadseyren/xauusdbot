@@ -9,6 +9,8 @@ class POIType(Enum):
 class POIStatus(Enum):
     ACTIVE = "ACTIVE"
     ARMED = "ARMED"
+    CHOCH_CONFIRMED = "CHOCH_CONFIRMED"
+    LEFT_AREA = "LEFT_AREA"
     MITIGATED = "MITIGATED"
     INVALIDATED = "INVALIDATED"
 
@@ -27,6 +29,7 @@ class POI:
         self.poi_type = poi_type
         self.status = POIStatus.ACTIVE
         self.end_time = None
+        self.choch_sl_price = None
         
     def is_valid_size(self, max_percent: float = 5.0) -> bool:
         """KURAL 1 - Maksimum Alan Boyutu Kuralı"""
@@ -36,15 +39,16 @@ class POI:
     def is_price_inside(self, price: float) -> bool:
         return self.bottom <= price <= self.top
         
-    def check_invalidation(self, current_close: float, current_time) -> bool:
+    def check_invalidation(self, current_high: float, current_low: float, current_time) -> bool:
         """
         Alanın içinde hiç işlem vermeden komple alanın içinden geçilip ihlal edilirse de alan geçersizleşir.
+        İhlal kontrolünde fitiller (high/low) baz alınır.
         """
-        if self.poi_type == POIType.LONG and current_close < self.bottom:
+        if self.poi_type == POIType.LONG and current_low < self.bottom:
             self.status = POIStatus.INVALIDATED
             self.end_time = current_time
             return True
-        if self.poi_type == POIType.SHORT and current_close > self.top:
+        if self.poi_type == POIType.SHORT and current_high > self.top:
             self.status = POIStatus.INVALIDATED
             self.end_time = current_time
             return True
