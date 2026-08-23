@@ -58,6 +58,7 @@ async function recalc4HAreas() {
         if (data && !data.error) {
             global4HAreas = data.pois.map(poi => ({
                 type: poi.type,
+                status: poi.status || 'unknown',
                 box_start_time: poi.start_time - tzOffsetSeconds,
                 end_time: poi.end_time ? poi.end_time - tzOffsetSeconds : null,
                 top: poi.top,
@@ -72,7 +73,11 @@ async function recalc4HAreas() {
                 trade_sl: t.sl_price,
                 trade_tp: t.tp_price,
                 status: t.status,
-                direction: t.direction
+                direction: t.direction,
+                choch_time: t.choch_time ? t.choch_time - tzOffsetSeconds : null,
+                choch_price: t.choch_price,
+                swing_time: t.swing_time ? t.swing_time - tzOffsetSeconds : null,
+                swing_price: t.swing_price
             }));
             
             console.log(`Loaded ${global4HAreas.length} POIs and ${window.globalTrades.length} trades from backend.`);
@@ -187,6 +192,10 @@ async function jumpToTrade(time) {
 // Indicator State & Custom Primitive
 const indicatorSettings = {
     enabled: false,
+    showValidAreas: true,
+    showInvalidAreas: true,
+    showTrades: true,
+    showChoch: true,
     emaPeriod: 100,
     maxLookback: 6,
     maxPercent: 15
@@ -413,6 +422,41 @@ class TradePrimitive {
                                     ctx.strokeStyle = trade.status === 'win' ? 'rgba(38, 166, 154, 0.8)' : 'rgba(239, 83, 80, 0.8)';
                                     ctx.stroke();
                                 }
+                                
+                                // Draw CHoCH and Swing Points if available
+                                if (indicatorSettings.showChoch && trade.choch_time && trade.swing_time) {
+                                    let chochX = timeScale.timeToCoordinate(trade.choch_time);
+                                    let swingX = timeScale.timeToCoordinate(trade.swing_time);
+                                    
+                                    if (chochX !== null && swingX !== null) {
+                                        chochX *= scope.horizontalPixelRatio;
+                                        swingX *= scope.horizontalPixelRatio;
+                                        
+                                        const chochY = _this.series.priceToCoordinate(trade.choch_price) * scope.verticalPixelRatio;
+                                        const swingY = _this.series.priceToCoordinate(trade.swing_price) * scope.verticalPixelRatio;
+                                        
+                                        // Draw Swing Point Dot
+                                        ctx.beginPath();
+                                        ctx.arc(swingX, swingY, 4 * scope.horizontalPixelRatio, 0, 2 * Math.PI);
+                                        ctx.fillStyle = '#ff9800'; // Orange
+                                        ctx.fill();
+                                        
+                                        // Draw CHoCH Point Dot
+                                        ctx.beginPath();
+                                        ctx.arc(chochX, chochY, 4 * scope.horizontalPixelRatio, 0, 2 * Math.PI);
+                                        ctx.fillStyle = '#2196f3'; // Blue
+                                        ctx.fill();
+                                        
+                                        // Draw dashed line between them
+                                        ctx.beginPath();
+                                        ctx.moveTo(swingX, swingY);
+                                        ctx.lineTo(chochX, chochY);
+                                        ctx.strokeStyle = 'rgba(255, 255, 255, 0.5)';
+                                        ctx.setLineDash([5, 5]);
+                                        ctx.stroke();
+                                        ctx.setLineDash([]); // Reset
+                                    }
+                                }
                             });
                         });
                     }
@@ -433,7 +477,20 @@ function updateIndicator() {
         return;
     }
     
-    let areas = global4HAreas.map(area => ({...area}));
+    let areas = [];
+    if (indicatorSettings.enabled) {
+        areas = global4HAreas.filter(area => {
+            if (area.status === 'invalidated') {
+                return indicatorSettings.showInvalidAreas;
+            } else if (area.status === 'mitigated') {
+                return indicatorSettings.showValidAreas;
+            } else {
+                // Kullanıcının tanımına göre: "sadece işlem açmaya neden olan alanlar valid"
+                // Bu yüzden henüz işlem görmemiş (ACTIVE/ARMED) alanlar hiçbir şekilde gösterilmeyecek.
+                return false;
+            }
+        }).map(area => ({...area}));
+    }
     
     areas.forEach(area => {
         let startIndex = currentChartData.findIndex(c => c.time >= area.box_start_time);
@@ -450,7 +507,7 @@ function updateIndicator() {
     
     areaPrimitive.setAreas(areas);
     
-    if (window.globalTrades && currentTimeframe !== '4h' && currentTimeframe !== '1d') {
+    if (indicatorSettings.enabled && indicatorSettings.showTrades && window.globalTrades && currentTimeframe !== '4h' && currentTimeframe !== '1d') {
         let trades = window.globalTrades.map(t => ({...t}));
         trades.forEach(t => {
             let entryIndex = currentChartData.findIndex(c => c.time >= t.entry_time);
@@ -683,6 +740,10 @@ const indicatorBtn = document.getElementById('indicator-btn');
 const indicatorMenu = document.getElementById('indicator-menu');
 const closeMenuBtn = document.getElementById('close-menu-btn');
 const toggleAreasInput = document.getElementById('toggle-areas');
+const toggleValidAreasInput = document.getElementById('toggle-valid-areas');
+const toggleInvalidAreasInput = document.getElementById('toggle-invalid-areas');
+const toggleTradesInput = document.getElementById('toggle-trades');
+const toggleChochInput = document.getElementById('toggle-choch');
 const emaPeriodInput = document.getElementById('ema-period');
 const maxLookbackInput = document.getElementById('max-lookback');
 const maxPercentInput = document.getElementById('max-percent');
@@ -700,14 +761,21 @@ if (closeMenuBtn) {
 
 function applySettings() {
     indicatorSettings.enabled = toggleAreasInput.checked;
+    indicatorSettings.showValidAreas = toggleValidAreasInput ? toggleValidAreasInput.checked : true;
+    indicatorSettings.showInvalidAreas = toggleInvalidAreasInput ? toggleInvalidAreasInput.checked : true;
+    indicatorSettings.showTrades = toggleTradesInput ? toggleTradesInput.checked : true;
+    indicatorSettings.showChoch = toggleChochInput ? toggleChochInput.checked : true;
     indicatorSettings.emaPeriod = parseInt(emaPeriodInput.value) || 100;
     indicatorSettings.maxLookback = parseInt(maxLookbackInput.value) || 6;
     indicatorSettings.maxPercent = parseInt(maxPercentInput.value) || 15;
-    recalc4HAreas();
     updateIndicator();
 }
 
 if (toggleAreasInput) toggleAreasInput.addEventListener('change', applySettings);
+if (toggleValidAreasInput) toggleValidAreasInput.addEventListener('change', applySettings);
+if (toggleInvalidAreasInput) toggleInvalidAreasInput.addEventListener('change', applySettings);
+if (toggleTradesInput) toggleTradesInput.addEventListener('change', applySettings);
+if (toggleChochInput) toggleChochInput.addEventListener('change', applySettings);
 // Parameters are now submitted via the Run Backtest button
 
 const runBacktestBtn = document.getElementById('run-backtest-btn');
@@ -732,6 +800,7 @@ if (runBacktestBtn) {
             if (data && !data.error) {
                 global4HAreas = data.pois.map(poi => ({
                     type: poi.type,
+                    status: poi.status || 'unknown',
                     box_start_time: poi.start_time - tzOffsetSeconds,
                     end_time: poi.end_time ? poi.end_time - tzOffsetSeconds : null,
                     top: poi.top,
@@ -746,7 +815,11 @@ if (runBacktestBtn) {
                     trade_sl: t.sl_price,
                     trade_tp: t.tp_price,
                     status: t.status,
-                    direction: t.direction
+                    direction: t.direction,
+                    choch_time: t.choch_time ? t.choch_time - tzOffsetSeconds : null,
+                    choch_price: t.choch_price,
+                    swing_time: t.swing_time ? t.swing_time - tzOffsetSeconds : null,
+                    swing_price: t.swing_price
                 }));
                 
                 renderTradesList();

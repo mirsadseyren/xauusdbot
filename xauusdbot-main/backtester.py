@@ -67,6 +67,7 @@ def run_backtest(data_path: str, ema_period: int = 100, max_lookback: int = 6, m
         json_data["pois"].append({
             "id": poi.id,
             "type": poi.poi_type.name.lower(),
+            "status": poi.status.name.lower(),
             "top": poi.top,
             "bottom": poi.bottom,
             "confirm_time": int(poi.confirm_time.value // 1_000_000_000),
@@ -82,7 +83,11 @@ def run_backtest(data_path: str, ema_period: int = 100, max_lookback: int = 6, m
             "tp_price": t.tp_price,
             "status": t.status.name.lower(),
             "entry_time": int(t.entry_time.value // 1_000_000_000) if t.entry_time else None,
-            "exit_time": int(t.exit_time.value // 1_000_000_000) if t.exit_time else None
+            "exit_time": int(t.exit_time.value // 1_000_000_000) if t.exit_time else None,
+            "choch_time": int(t.choch_time.value // 1_000_000_000) if t.choch_time else None,
+            "choch_price": t.choch_price,
+            "swing_time": int(t.swing_time.value // 1_000_000_000) if t.swing_time else None,
+            "swing_price": t.swing_price
         })
         
     with open(json_file, "w") as f:

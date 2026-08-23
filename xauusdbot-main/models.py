@@ -59,26 +59,29 @@ class POI:
 
 
 class Trade:
-    def __init__(self, poi: POI, entry_price: float, sl_price: float, entry_time):
+    def __init__(self, poi: POI, entry_price: float, entry_time):
         self.poi = poi
         self.entry_price = entry_price
-        self.sl_price = sl_price
         self.entry_time = entry_time
         self.direction = poi.poi_type
         self.status = TradeStatus.ACTIVE
         self.exit_time = None
+        self.choch_time = None
+        self.choch_price = None
+        self.swing_time = None
+        self.swing_price = None
         
-        # Sabit Risk/Ödül (1:1 R:R)
-        risk = abs(self.entry_price - self.sl_price)
+        # Sabit %1 SL ve %1 TP
         if self.direction == POIType.LONG:
-            self.tp_price = self.entry_price + risk
+            self.sl_price = self.entry_price * 0.99
+            self.tp_price = self.entry_price * 1.01
         else:
-            self.tp_price = self.entry_price - risk
+            self.sl_price = self.entry_price * 1.01
+            self.tp_price = self.entry_price * 0.99
             
     def is_risk_valid(self) -> bool:
-        """Maksimum Stop-Loss Sınırı (Kritik %0.3 Filtresi)"""
-        risk_pct = (abs(self.entry_price - self.sl_price) / self.entry_price) * 100
-        return risk_pct <= 0.3
+        """Maksimum Stop-Loss Sınırı (Statik %1 olduğu için hep geçerli)"""
+        return True
         
     def check_exit(self, high: float, low: float, current_time) -> bool:
         """
