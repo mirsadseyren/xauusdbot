@@ -123,7 +123,7 @@ from pydantic import BaseModel
 class BacktestRequest(BaseModel):
     emaPeriod: int = 100
     maxLookback: int = 6
-    maxPercent: float = 15.0
+    maxPercent: float = 6.0
 
 @app.post("/api/run-backtest")
 async def api_run_backtest(req: BacktestRequest):

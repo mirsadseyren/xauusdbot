@@ -3,7 +3,7 @@ from models import POI, POIType
 from typing import List
 
 class POIGenerator:
-    def __init__(self, ema_period=100, max_lookback=6, max_percent=5.0):
+    def __init__(self, ema_period=100, max_lookback=6, max_percent=6.0):
         self.ema_period = ema_period
         self.max_lookback = max_lookback
         self.max_percent = max_percent
@@ -11,7 +11,8 @@ class POIGenerator:
     def generate_pois(self, df_4h: pd.DataFrame) -> List[POI]:
         """
         Geçmiş 4H mumlarını tara, wick-tabanlı reaksiyon alanlarını bul.
-        EMA filtresi ve 'karşıt hareketin en uç noktası' mantığını kullanır.
+        EMA filtresi kullanılır. Countertrend'in gerçek başlangıcı signal
+        candle (i) olarak kabul edilir — lookback ile yapay ekstrem alınmaz.
         i=k skip kaldırıldı: Üst üste binen (overlapping) POI'lere izin verir.
         """
         if len(df_4h) < self.ema_period:
@@ -48,14 +49,13 @@ class POIGenerator:
             # Sinyal: Trend aşağı, önceki mum kırmızı, şimdiki mum yeşil
             # ──────────────────────────────────────────────────────
             if is_downtrend and is_green and prev_is_red:
-                lookback_start = max(0, i - self.max_lookback)
-                lowest_low = lows[i]
-                for j in range(i, lookback_start - 1, -1):
-                    if lows[j] < lowest_low:
-                        lowest_low = lows[j]
+                # KURAL — Başlangıç wick'i countertrend'in gerçek başlangıcını temsil etmeli:
+                #   SHORT zone'un alt sınırı (bottom) = signal candle i'nin low'u.
+                #   Bu, yukarı countertrend'in tam başladığı noktadır; lookback ile
+                #   daha eski diplerden yapay bir alt sınır alınmaz.
+                lowest_low = lows[i]   # countertrend gerçek başlangıcı
 
                 highest_high = highs[i]
-                highest_index = i
 
                 k = i + 1
                 confirmed = False
@@ -63,22 +63,23 @@ class POIGenerator:
                 while k < len(df_4h):
                     if highs[k] > highest_high:
                         highest_high = highs[k]
-                        highest_index = k
                     if closes[k] < lowest_low:
                         confirmed = True
                         break
                     k += 1
 
                 if confirmed:
+                    # confirm_time: onay mumunun KAPANIŞI (açılış + 4h)
+                    confirm_close_time = times[k] + pd.Timedelta(hours=4)
                     poi = POI(
-                        start_time=times[highest_index],
-                        confirm_time=times[k],
+                        start_time=times[i],          # countertrend başlangıcı
+                        confirm_time=confirm_close_time,
                         top=highest_high,
                         bottom=lowest_low,
                         poi_type=POIType.SHORT
                     )
-                    poi.origin_time = times[i]
-                    poi.origin_price = lows[i]  # impulse started from this low
+                    poi.origin_time  = times[i]
+                    poi.origin_price = lows[i]
                     poi.confirm_price = closes[k]
                     if poi.is_valid_size(self.max_percent):
                         pois.append(poi)
@@ -89,14 +90,13 @@ class POIGenerator:
             # Sinyal: Trend yukarı, önceki mum yeşil, şimdiki mum kırmızı
             # ──────────────────────────────────────────────────────
             elif is_uptrend and is_red and prev_is_green:
-                lookback_start = max(0, i - self.max_lookback)
-                highest_high = highs[i]
-                for j in range(i, lookback_start - 1, -1):
-                    if highs[j] > highest_high:
-                        highest_high = highs[j]
+                # KURAL — Başlangıç wick'i countertrend'in gerçek başlangıcını temsil etmeli:
+                #   LONG zone'un üst sınırı (top) = signal candle i'nin high'ı.
+                #   Bu, aşağı countertrend'in tam başladığı noktadır; lookback ile
+                #   daha eski tepelerden yapay bir üst sınır alınmaz.
+                highest_high = highs[i]   # countertrend gerçek başlangıcı
 
                 lowest_low = lows[i]
-                lowest_index = i
 
                 k = i + 1
                 confirmed = False
@@ -104,22 +104,23 @@ class POIGenerator:
                 while k < len(df_4h):
                     if lows[k] < lowest_low:
                         lowest_low = lows[k]
-                        lowest_index = k
                     if closes[k] > highest_high:
                         confirmed = True
                         break
                     k += 1
 
                 if confirmed:
+                    # confirm_time: onay mumunun KAPANIŞI (açılış + 4h)
+                    confirm_close_time = times[k] + pd.Timedelta(hours=4)
                     poi = POI(
-                        start_time=times[lowest_index],
-                        confirm_time=times[k],
+                        start_time=times[i],          # countertrend başlangıcı
+                        confirm_time=confirm_close_time,
                         top=highest_high,
                         bottom=lowest_low,
                         poi_type=POIType.LONG
                     )
-                    poi.origin_time = times[i]
-                    poi.origin_price = highs[i]  # impulse started from this high
+                    poi.origin_time  = times[i]
+                    poi.origin_price = highs[i]
                     poi.confirm_price = closes[k]
                     if poi.is_valid_size(self.max_percent):
                         pois.append(poi)
