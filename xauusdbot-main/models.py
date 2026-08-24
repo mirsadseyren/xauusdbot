@@ -56,16 +56,18 @@ class POI:
     def is_price_inside(self, price: float) -> bool:
         return self.bottom <= price <= self.top
 
-    def check_invalidation(self, current_high: float, current_low: float, current_time) -> bool:
+    def check_invalidation(self, current_close: float, current_time) -> bool:
         """
-        Fitil karşı yönden geçişi → INVALIDATED.
-        LONG: low < bottom  |  SHORT: high > top
+        KURAL — İnvalidasyon yalnızca 3M KAPANIŞLA (SPEC §57/§58/§109):
+          Fitil tek başına yeterli DEĞİLDİR; kapanış alanın karşı sınırının
+          ötesindeyse alan INVALIDATED olur.
+        LONG: close < bottom  |  SHORT: close > top
         """
-        if self.poi_type == POIType.LONG and current_low < self.bottom:
+        if self.poi_type == POIType.LONG and current_close < self.bottom:
             self.status   = POIStatus.INVALIDATED
             self.end_time = current_time
             return True
-        if self.poi_type == POIType.SHORT and current_high > self.top:
+        if self.poi_type == POIType.SHORT and current_close > self.top:
             self.status   = POIStatus.INVALIDATED
             self.end_time = current_time
             return True

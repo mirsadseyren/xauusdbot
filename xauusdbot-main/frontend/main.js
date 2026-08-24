@@ -202,7 +202,7 @@ const indicatorSettings = {
     showFormation: true,
     emaPeriod: 100,
     maxLookback: 6,
-    maxPercent: 15
+    maxPercent: 6
 };
 
 class AreaPrimitive {
@@ -816,7 +816,7 @@ function applySettings() {
     indicatorSettings.showFormation = toggleFormationInput ? toggleFormationInput.checked : true;
     indicatorSettings.emaPeriod = parseInt(emaPeriodInput.value) || 100;
     indicatorSettings.maxLookback = parseInt(maxLookbackInput.value) || 6;
-    indicatorSettings.maxPercent = parseInt(maxPercentInput.value) || 15;
+    indicatorSettings.maxPercent = parseInt(maxPercentInput.value) || 6;
     updateIndicator();
 }
 
@@ -837,7 +837,7 @@ if (runBacktestBtn) {
             const reqBody = {
                 emaPeriod: parseInt(emaPeriodInput.value) || 100,
                 maxLookback: parseInt(maxLookbackInput.value) || 6,
-                maxPercent: parseFloat(maxPercentInput.value) || 15.0
+                maxPercent: parseFloat(maxPercentInput.value) || 6.0
             };
             
             const res = await fetch('/api/run-backtest', {

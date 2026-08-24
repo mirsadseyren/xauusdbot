@@ -23,14 +23,11 @@ class TradingEngine:
 
     def _is_touching(self, poi: POI, high: float, low: float) -> bool:
         """
-        Mum fitilinin (high/low) alan sınırını kesip kesmediğini kontrol eder.
-        LONG demand: low <= top   (fitil alanın üst sınırına veya içine ulaşıyor)
-        SHORT supply: high >= bottom (fitil alanın alt sınırına veya içine ulaşıyor)
-        Not: check_invalidation önce çağrıldığı için 'tam geçiş' burada yakalanmaz.
+        Mumun (fitili) alan aralığıyla kesişip kesişmediğini kontrol eder (SPEC §29).
+        Bölgeler wick tabanlıdır; temas için fitil yeterlidir, kapanış gerekmez.
+        İki taraflı kontrol: low <= top VE high >= bottom.
         """
-        if poi.poi_type == POIType.LONG:
-            return low <= poi.top
-        return high >= poi.bottom
+        return low <= poi.top and high >= poi.bottom
 
     def _poi_size(self, poi: POI) -> float:
         return poi.top - poi.bottom
@@ -47,12 +44,14 @@ class TradingEngine:
         CHoCH varlığını kontrol eder; varsa işlem açar ve POI'yi MITIGATED yapar.
 
         KURAL — SL = CHoCH'u oluşturan hareketin son relevant Swing Low/High:
-          find_sl_swing ile bulunur. Swing yoksa entry'nin 0.5% uzagında fallback.
+          find_sl_swing ile bulunur. Swing yoksa işlem açılmaz (SPEC §45 tampon yok).
 
         KURAL — Entry alan dışında da geçerli:
-          current_close alan sınırının ötesinde olsa da geçerli entry sayılır.
+          current_close alan sınırının ötesinde olsa da geçerli entry sayılır (SPEC §39/§61).
 
-        Dönüş: True → trade açıldı + MITIGATED.
+        KURAL — SL > %0.3 ise işlem AÇILMAZ ve alan tükenmez (SPEC §46-49).
+
+        Dönüş: True → trade açıldı + MITIGATED. False → hiçbir şey değişmez, alan tükenmez.
         """
         entry_idx = self.armed_poi_entries.get(poi.id, bar_idx)
         is_choch, swing_price, swing_index = self.market_structure.check_choch(
@@ -61,18 +60,21 @@ class TradingEngine:
         if not is_choch:
             return False
 
-        # ── SL hesapla ───────────────────────────────────────────────────────
+        # ── SL hesapla (SPEC §44: CHoCH hareketinin son relevant swing'i) ─────
         sl_result = self.market_structure.find_sl_swing(
             self.df_3m, entry_idx, bar_idx, poi.poi_type
         )
-        if sl_result is not None:
-            sl_price = sl_result[0]
-        else:
-            # Fallback: entry'nin 0.5% uzagı (swing bulunamadıysa)
-            if poi.poi_type == POIType.LONG:
-                sl_price = current_close * 0.995
-            else:
-                sl_price = current_close * 1.005
+        if sl_result is None:
+            # Geçerli swing bulunamadı → SPEC §45 gereği tampon yok, işlem YOK,
+            # alan tükenmez (MITIGATED yapılmaz).
+            return False
+
+        sl_price = sl_result[0]
+
+        # ── Risk filtresi (SPEC §46-47/§93): SL > %0.3 → işlem YOK, alan tükenmez ──
+        sl_pct = abs(current_close - sl_price) / current_close * 100
+        if sl_pct > SL_PCT_THRESHOLD:
+            return False
 
         # ── İşlem aç ─────────────────────────────────────────────────────────
         trade = Trade(poi, current_close, current_time, sl_price)
@@ -114,36 +116,16 @@ class TradingEngine:
                 poi_idx += 1
 
             # ── 2. İşlem çıkışları (TP / SL) ─────────────────────────────────
-            # KURAL — SL > %0.3 → alan tükenmez; Touch #2 hakkı sürer:
-            #   SL ile kapanan trade'in POI'si ACTIVE'e geri döner, active_pois'e
-            #   yeniden eklenir ve aynı mum için invalidation atlanır.
-            just_recovered: Set[str] = set()
-
+            # SPEC §96: Bir alan en fazla 1 işlem açar; işlem TP/SL ile kapanınca
+            # alan tükenmiş sayılır (CONSUMED). SL > %0.3 ön-filtresi işlem
+            # açılmadan uygulandığı için burada alanı yeniden aktive ETMEYİZ.
             for trade in self.trades:
                 if trade.status != TradeStatus.ACTIVE:
                     continue
-                if not trade.check_exit(current_high, current_low, current_time):
-                    continue
-
-                if trade.status == TradeStatus.WIN:
-                    # TP → POI gerçekten tükendi
-                    trade.poi.end_time = trade.exit_time
-
-                else:  # LOSS (SL)
-                    sl_pct = abs(trade.entry_price - trade.sl_price) / trade.entry_price * 100
-                    if sl_pct > SL_PCT_THRESHOLD:
-                        # Alan tükenmez; POI'yi ACTIVE'e geri döndür
-                        poi            = trade.poi
-                        poi.status     = POIStatus.ACTIVE
-                        poi._price_inside = False   # SL fiyatı alanın dışında
-                        poi.end_time   = None
-                        just_recovered.add(poi.id)
-                        if poi not in self.active_pois:
-                            self.active_pois.append(poi)
-                        self.armed_poi_entries.pop(poi.id, None)
+                trade.check_exit(current_high, current_low, current_time)
 
             # ── 3. Overlap: aynı mumda birden fazla temas → küçük alan kazanır ──
-            # KURAL: Aynı anda iki alana temas → küçük alan kazanır, büyük INVALIDATED.
+            # KURAL: Aynı anda iki alana temas → küçük alan kazanır, büyük INVALIDATED (SPEC §63/§98).
             touching_now = [
                 p for p in self.active_pois
                 if p.status in (POIStatus.ACTIVE, POIStatus.ARMED)
@@ -158,86 +140,73 @@ class TradingEngine:
             # ── 4. POI State Machine ──────────────────────────────────────────
             for poi in list(self.active_pois):
 
-                # SL kurtarmalı POI: bu mum için invalidation atlanır
-                skip_invalidation = poi.id in just_recovered
-
                 # Temizlik: MITIGATED / INVALIDATED → listeden çıkar
                 if poi.status in (POIStatus.MITIGATED, POIStatus.INVALIDATED):
                     self.active_pois.remove(poi)
                     self.armed_poi_entries.pop(poi.id, None)
                     continue
 
-                # Fitil karşı yönde geçti mi? (SL kurtarmasında bu mum atlanır)
-                if not skip_invalidation:
-                    if poi.check_invalidation(current_high, current_low, current_time):
-                        continue
+                # KURAL — İnvalidasyon yalnızca 3M KAPANIŞLA (SPEC §57/§58/§109):
+                #   fitil tek başına yeterli değildir; kapanış karşı taraftaysa alan ölür.
+                if poi.check_invalidation(current_close, current_time):
+                    continue
 
                 touching = self._is_touching(poi, current_high, current_low)
 
                 # ────────────────────────────────────────────────────────────
                 # STATE: ACTIVE — Temas bekleniyor
+                #   SPEC §31/§80: ilk temasta 3M izleme BAŞLAR (CHoCH aranır).
                 # ────────────────────────────────────────────────────────────
                 if poi.status == POIStatus.ACTIVE:
                     if touching:
                         if not poi._price_inside:
-                            # Dışarıdan içeriye: yeni temas başladı
+                            # Yeni temas başladı
                             poi.touch_count  += 1
                             poi._price_inside = True
 
-                            # KURAL — Touch #3 yok:
+                            # KURAL — Touch #3 yok (SPEC §52-55):
                             if poi.touch_count > MAX_TOUCHES:
                                 poi.status   = POIStatus.INVALIDATED
                                 poi.end_time = current_time
                                 continue
 
-                            # CHoCH ön şartı: daha önce alandan çıkıldıysa ARMED'a geç
-                            if poi.has_left_after_touch:
-                                poi.status = POIStatus.ARMED
-                                self.armed_poi_entries[poi.id] = i
-
-                                # KURAL — Aynı 3M mumda temas + CHoCH geçerli:
-                                #   ARMED'a geçtiğimiz mum, aynı zamanda CHoCH onay
-                                #   mumu olabilir; entry o mumun kapanışıdır.
-                                if self._try_choch(poi, i, current_close, current_time, times):
-                                    continue   # MITIGATED → sonraki mum temizlenir
-                        # else: aynı temas devam ediyor — sayma
-
+                            # İlk temasta ARMED'a geç ve aynı mumda CHoCH dene (SPEC §40)
+                            poi.status = POIStatus.ARMED
+                            self.armed_poi_entries[poi.id] = i
+                            if self._try_choch(poi, i, current_close, current_time, times):
+                                continue   # MITIGATED → sonraki mum temizlenir
+                        else:
+                            # Aynı temas devam ediyor — yine de CHoCH ara
+                            if self._try_choch(poi, i, current_close, current_time, times):
+                                continue
                     else:
                         if poi._price_inside:
-                            # İçerideydi, şimdi dışarı çıktı → ön şart karşılandı
-                            poi._price_inside     = False
-                            poi.has_left_after_touch = True
-
-                            # KURAL — 2. temas boş çıkarsa invalidate:
-                            #   touch_count MAX_TOUCHES'a ulaştıysa ve CHoCH oluşmadıysa
-                            #   (zaten ARMED'dan buraya gelinmez; burası ACTIVE'den çıkış),
-                            #   alan geçersizleşir.
+                            # İçerideydi, şimdi dışarı çıktı → temas bitti (henüz işlem yok)
+                            poi._price_inside = False
+                            poi.status        = POIStatus.ACTIVE
+                            # 2. temas da boş çıkarsa invalidate (SPEC §55)
                             if poi.touch_count >= MAX_TOUCHES:
                                 poi.status   = POIStatus.INVALIDATED
                                 poi.end_time = current_time
 
                 # ────────────────────────────────────────────────────────────
-                # STATE: ARMED — CHoCH aranıyor
+                # STATE: ARMED — CHoCH aranıyor (temas #1 ve #2'de de)
                 # ────────────────────────────────────────────────────────────
                 elif poi.status == POIStatus.ARMED:
                     if touching:
-                        # Fitil hâlâ alanda → CHoCH ara.
-                        # KURAL — Entry alan dışında da geçerli:
-                        #   Onay mumunun kapanışı (current_close) alan sınırının
-                        #   ötesinde olsa da geçerli CHoCH sayılır.
+                        poi._price_inside = True
+                        # KURAL — Entry alan dışında da geçerli (SPEC §39/§61):
+                        #   Onay mumunun kapanışı alan sınırının ötesinde olsa da CHoCH geçerli.
                         if self._try_choch(poi, i, current_close, current_time, times):
                             continue
-
-                        # Temas devam ediyor ama CHoCH yok; _price_inside koru
-                        poi._price_inside = True
-
                     else:
                         if poi._price_inside:
-                            # KURAL — 2. temas boş çıkarsa invalidate:
-                            #   Fitil alan sınırını kesmez hale geldi → temas bitti,
-                            #   CHoCH oluşmadı → bu temas "boş" sayılır → INVALIDATED.
+                            # Fitil alan sınırını kesmez hale geldi → temas bitti, CHoCH yok
                             poi._price_inside = False
-                            poi.status        = POIStatus.INVALIDATED
-                            poi.end_time      = current_time
+                            poi.status        = POIStatus.ACTIVE
+                            # 2. temas boş çıkınca invalidate (SPEC §55)
+                            if poi.touch_count >= MAX_TOUCHES:
+                                poi.status   = POIStatus.INVALIDATED
+                                poi.end_time = current_time
 
         print(f"Simulation Finished. Processed {len(self.trades)} trades.")

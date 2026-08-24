@@ -17,8 +17,8 @@ class MarketStructure:
         if idx - fp < 0 or idx + fp >= len(highs):
             return False
         for j in range(1, fp + 1):
-            # Sol komşu daha yüksek veya sağ komşu eşit/yüksek → değil
-            if highs[idx - j] > highs[idx] or highs[idx + j] >= highs[idx]:
+            # SPEC §34: merkez HIGH, sol ve sağ komşulardan KESİN daha yüksek olmalı
+            if highs[idx - j] >= highs[idx] or highs[idx + j] >= highs[idx]:
                 return False
         return True
 
@@ -28,7 +28,8 @@ class MarketStructure:
         if idx - fp < 0 or idx + fp >= len(lows):
             return False
         for j in range(1, fp + 1):
-            if lows[idx - j] < lows[idx] or lows[idx + j] <= lows[idx]:
+            # SPEC §35: merkez LOW, sol ve sağ komşulardan KESİN daha düşük olmalı
+            if lows[idx - j] <= lows[idx] or lows[idx + j] <= lows[idx]:
                 return False
         return True
 

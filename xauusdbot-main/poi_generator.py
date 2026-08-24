@@ -45,15 +45,15 @@ class POIGenerator:
             prev_is_red = closes[i-1] <= opens[i-1]
 
             # ──────────────────────────────────────────────────────
-            # SHORT POI (Supply Zone) — Downtrend
+            # LONG POI (Demand Zone) — Ana yön DOWN + countertrend UP (SPEC §5/§87)
             # Sinyal: Trend aşağı, önceki mum kırmızı, şimdiki mum yeşil
             # ──────────────────────────────────────────────────────
             if is_downtrend and is_green and prev_is_red:
-                # KURAL — Başlangıç wick'i countertrend'in gerçek başlangıcını temsil etmeli:
-                #   SHORT zone'un alt sınırı (bottom) = signal candle i'nin low'u.
-                #   Bu, yukarı countertrend'in tam başladığı noktadır; lookback ile
-                #   daha eski diplerden yapay bir alt sınır alınmaz.
-                lowest_low = lows[i]   # countertrend gerçek başlangıcı
+                # SPEC §12-14: Başlangıç wick'i countertrend'in gerçek başlangıcını
+                # temsil etmeli. Sinyal mumundan geriye kadar (max_lookback) en düşük
+                # low'u alarak hareketin gerçek başladığı yeri buluruz.
+                lookback_start = max(0, i - self.max_lookback)
+                lowest_low = min(lows[lookback_start:i+1])   # countertrend başlangıcı
 
                 highest_high = highs[i]
 
@@ -69,14 +69,14 @@ class POIGenerator:
                     k += 1
 
                 if confirmed:
-                    # confirm_time: onay mumunun KAPANIŞI (açılış + 4h)
+                    # confirm_time: onay mumunun KAPANIŞI (açılış + 4h) — look-ahead yok
                     confirm_close_time = times[k] + pd.Timedelta(hours=4)
                     poi = POI(
                         start_time=times[i],          # countertrend başlangıcı
                         confirm_time=confirm_close_time,
                         top=highest_high,
                         bottom=lowest_low,
-                        poi_type=POIType.SHORT
+                        poi_type=POIType.LONG
                     )
                     poi.origin_time  = times[i]
                     poi.origin_price = lows[i]
@@ -86,15 +86,15 @@ class POIGenerator:
                     # i=k YOK: Üst üste binen POI'lere izin verir
 
             # ──────────────────────────────────────────────────────
-            # LONG POI (Demand Zone) — Uptrend
+            # SHORT POI (Supply Zone) — Ana yön UP + countertrend DOWN (SPEC §5/§87)
             # Sinyal: Trend yukarı, önceki mum yeşil, şimdiki mum kırmızı
             # ──────────────────────────────────────────────────────
             elif is_uptrend and is_red and prev_is_green:
-                # KURAL — Başlangıç wick'i countertrend'in gerçek başlangıcını temsil etmeli:
-                #   LONG zone'un üst sınırı (top) = signal candle i'nin high'ı.
-                #   Bu, aşağı countertrend'in tam başladığı noktadır; lookback ile
-                #   daha eski tepelerden yapay bir üst sınır alınmaz.
-                highest_high = highs[i]   # countertrend gerçek başlangıcı
+                # SPEC §12-14: Başlangıç wick'i countertrend'in gerçek başlangıcını
+                # temsil etmeli. Sinyal mumundan geriye kadar (max_lookback) en yüksek
+                # high'ı alarak hareketin gerçek başladığı yeri buluruz.
+                lookback_start = max(0, i - self.max_lookback)
+                highest_high = max(highs[lookback_start:i+1])   # countertrend başlangıcı
 
                 lowest_low = lows[i]
 
@@ -110,14 +110,14 @@ class POIGenerator:
                     k += 1
 
                 if confirmed:
-                    # confirm_time: onay mumunun KAPANIŞI (açılış + 4h)
+                    # confirm_time: onay mumunun KAPANIŞI (açılış + 4h) — look-ahead yok
                     confirm_close_time = times[k] + pd.Timedelta(hours=4)
                     poi = POI(
                         start_time=times[i],          # countertrend başlangıcı
                         confirm_time=confirm_close_time,
                         top=highest_high,
                         bottom=lowest_low,
-                        poi_type=POIType.LONG
+                        poi_type=POIType.SHORT
                     )
                     poi.origin_time  = times[i]
                     poi.origin_price = highs[i]
